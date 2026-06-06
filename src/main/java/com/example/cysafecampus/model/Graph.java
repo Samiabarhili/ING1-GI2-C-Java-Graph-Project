@@ -33,9 +33,11 @@ public class Graph implements Subject, Serializable {
     public Graph() {
         this.elements = new ArrayList<>();
         this.passages = new ArrayList<>();
-        this.agents = new ArrayList<>();
+        // Synchronized to prevent ConcurrentModificationException between
+        // the simulation thread (tick/move) and the JavaFX render thread (draw)
+        this.agents = java.util.Collections.synchronizedList(new ArrayList<>());
         this.sensors = new ArrayList<>();
-        this.observers = new ArrayList<>();
+        this.observers = java.util.Collections.synchronizedList(new ArrayList<>());
     }
 
     // ── Building Elements ─────────────────────────────────
@@ -63,7 +65,7 @@ public class Graph implements Subject, Serializable {
 
     public void removeAgent(Agent agent) {
         agents.remove(agent);
-        removeObserver(agent);
+        observers.remove(agent); // ensure no ghost observer remains
     }
 
     public List<Agent> getAgents() { return agents; }
