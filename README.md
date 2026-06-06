@@ -125,4 +125,3 @@ cysafecampus/
 - **Serialization** — `SimulationSerializer` for save/load
 
 -----
-s
