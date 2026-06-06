@@ -70,7 +70,7 @@ public class SecurityView {
         statusCard.setPadding(new Insets(20));
         statusCard.setAlignment(Pos.CENTER);
         statusCard.setStyle("-fx-background-color:white;-fx-border-color:#e0e0e0;" +
-            "-fx-border-radius:12;-fx-background-radius:12;");
+            "-fx-border-radius:12;-fx-background-radius:12;-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.06),6,0,0,2);");
 
         // ── Alert banner ──────────────────────────────────
         alertBanner = new Label("Zone sécurisée");
@@ -84,7 +84,7 @@ public class SecurityView {
         VBox alertBox = new VBox(8, alertIcon, alertBanner);
         alertBox.setPadding(new Insets(16));
         alertBox.setAlignment(Pos.CENTER);
-        alertBox.setStyle("-fx-background-color:#f5f5f5;-fx-border-color:#e0e0e0;" +
+        alertBox.setStyle("-fx-background-color:#f8f9fa;-fx-border-color:#e8eaed;" +
             "-fx-border-radius:12;-fx-background-radius:12;");
 
         // ── Door controls ─────────────────────────────────
@@ -115,11 +115,11 @@ public class SecurityView {
             new Separator(),
             doorTitle, doorControls, openAllBtn);
         content.setPadding(new Insets(16));
-        content.setStyle("-fx-background-color:#fafafa;");
+        content.setBackground(new javafx.scene.layout.Background(new javafx.scene.layout.BackgroundFill(javafx.scene.paint.Color.WHITE, javafx.scene.layout.CornerRadii.EMPTY, javafx.geometry.Insets.EMPTY)));
 
         ScrollPane scroll = new ScrollPane(content);
         scroll.setFitToWidth(true);
-        scroll.setStyle("-fx-background-color:#fafafa;-fx-background:fafafa;");
+        scroll.setBackground(new javafx.scene.layout.Background(new javafx.scene.layout.BackgroundFill(javafx.scene.paint.Color.WHITE, javafx.scene.layout.CornerRadii.EMPTY, javafx.geometry.Insets.EMPTY)));
 
         BorderPane root = new BorderPane();
         root.setTop(header);
