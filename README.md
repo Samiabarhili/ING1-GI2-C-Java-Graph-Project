@@ -124,4 +124,4 @@ cysafecampus/
 - **MVC** — `GraphController` connects the model and JavaFX views
 - **Serialization** — `SimulationSerializer` for save/load
 
------ 
+-----  
