@@ -29,6 +29,7 @@
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SensorEventType.java
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SensorObserver.java
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SimulationEngine.java
+/workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SimulationSerializer.java
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SmokeSensor.java
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/Subject.java
 /workspaces/ING1-GI2-C-Java-Graph-Project/src/main/java/com/example/cysafecampus/model/SupervisorAgent.java

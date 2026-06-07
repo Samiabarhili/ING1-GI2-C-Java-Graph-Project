@@ -60,10 +60,18 @@ public class Graph implements Subject, Serializable {
      */
     public void addAgent(Agent agent) {
         agents.add(agent);
+
+         if (agent.getCurrentLocation() != null) {
+            agent.getCurrentLocation().agentEnters(agent.getMaxSpeed());
+        }
+
         addObserver(agent);
     }
 
     public void removeAgent(Agent agent) {
+        if (agent.getCurrentLocation() != null) {
+            agent.getCurrentLocation().agentLeaves();
+        }
         agents.remove(agent);
         observers.remove(agent); // ensure no ghost observer remains
     }
