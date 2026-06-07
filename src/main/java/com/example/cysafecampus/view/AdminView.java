@@ -282,45 +282,35 @@ public class AdminView {
         gc.fillRect(0, 0, CW, CH);
 
         // ── Edges ─────────────────────────────────────────
-        for (Passage p : graph.getPassages()) {
-            if (p.getName().contains("↔")) continue;
-            javafx.geometry.Point2D pp = pos.get(p.getName());
-            if (pp == null) continue;
-            for (Door d : p.getConnectedDoors()) {
-                if (d.getRoom().getName().contains("↔")) continue;
-                javafx.geometry.Point2D rp = pos.get(d.getRoom().getName());
-                if (rp == null) continue;
-
-                double density = p.getMaxCapacity() > 0
-                    ? (double) p.getCurrentOccupancy() / p.getMaxCapacity() : 0;
-                // Gradient edge color by density
-                if (density < 0.4) gc.setStroke(Color.web("#bdbdbd"));
-                else if (density < 0.8) gc.setStroke(Color.web("#ffb74d"));
-                else gc.setStroke(Color.web("#ef5350"));
-                gc.setLineWidth(density > 0.4 ? 2.5 : 1.5);
-                gc.strokeLine(pp.getX(), pp.getY(), rp.getX(), rp.getY());
-            }
-        }
+        drawDefaultEdges(gc);
 
         // ── Selected agent path highlight ─────────────────
         if (selectedAgent != null && selectedAgent.getPath() != null) {
             List<BuildingElement> path = selectedAgent.getPath();
+
             gc.setStroke(Color.web("#ff9800"));
             gc.setLineWidth(3.5);
             gc.setLineDashes(8, 4);
+
             for (int i = selectedAgent.getPathIndex(); i < path.size() - 1; i++) {
                 javafx.geometry.Point2D a = pos.get(path.get(i).getName());
-                javafx.geometry.Point2D b = pos.get(path.get(i+1).getName());
-                if (a != null && b != null) gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
+                javafx.geometry.Point2D b = pos.get(path.get(i + 1).getName());
+
+                if (a != null && b != null) {
+                    gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
+                }
             }
+
             gc.setLineDashes(0);
         }
 
         // ── Nodes ─────────────────────────────────────────
         for (BuildingElement el : graph.getElements()) {
             if (el.getName().contains("↔")) continue;
+
             javafx.geometry.Point2D p = pos.get(el.getName());
             if (p == null) continue;
+
             boolean selected = el.equals(selectedNode);
             drawNode(gc, el, p.getX(), p.getY(), selected);
         }
@@ -328,8 +318,49 @@ public class AdminView {
         // ── Agents ────────────────────────────────────────
         for (Agent a : graph.getAgents()) {
             javafx.geometry.Point2D p = agentPos(a);
-            if (p != null) drawAgent(gc, p.getX(), p.getY(), a, a.equals(selectedAgent));
+
+            if (p != null) {
+                drawAgent(gc, p.getX(), p.getY(), a, a.equals(selectedAgent));
+            }
         }
+    }
+
+    private void drawDefaultEdges(GraphicsContext gc) {
+        gc.setStroke(Color.web("#455a64"));
+        gc.setLineWidth(3.0);
+
+        drawEdge(gc, "Réserve", "Palier Esc. 1");
+        drawEdge(gc, "Palier Esc. 1", "Jonction Nord");
+
+        drawEdge(gc, "Bureau 1", "Jonction Nord");
+        drawEdge(gc, "Bureau 2", "Jonction Nord");
+
+        drawEdge(gc, "Jonction Nord", "Palier Esc. 2");
+        drawEdge(gc, "Palier Esc. 2", "Jonction Centrale");
+
+        drawEdge(gc, "LT Serveurs", "Jonction Centrale");
+        drawEdge(gc, "Bureau 3", "Jonction Centrale");
+
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 1");
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 2");
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 3");
+
+        drawEdge(gc, "Amphithéâtre", "Jonction Sud");
+        drawEdge(gc, "Logement", "Jonction Sud");
+        drawEdge(gc, "Jonction Sud", "Jonction Centrale");
+        drawEdge(gc, "Sortie Ouest", "Jonction Sud");
+    }
+
+    private void drawEdge(GraphicsContext gc, String from, String to) {
+        javafx.geometry.Point2D a = pos.get(from);
+        javafx.geometry.Point2D b = pos.get(to);
+
+        if (a == null || b == null) {
+            System.out.println("Missing edge position: " + from + " -> " + to);
+            return;
+        }
+
+        gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
     }
 
     private void drawNode(GraphicsContext gc, BuildingElement el, double x, double y, boolean selected) {
@@ -342,45 +373,71 @@ public class AdminView {
         gc.setLineWidth(strokeW);
 
         if (el instanceof Exit) {
-            gc.fillRoundRect(x-46, y-16, 92, 32, 10, 10);
-            gc.strokeRoundRect(x-46, y-16, 92, 32, 10, 10);
+            gc.fillRoundRect(x - 46, y - 16, 92, 32, 10, 10);
+            gc.strokeRoundRect(x - 46, y - 16, 92, 32, 10, 10);
         } else if (el instanceof Passage) {
-            double[] xs = {x, x+26, x, x-26};
-            double[] ys = {y-16, y, y+16, y};
-            gc.fillPolygon(xs, ys, 4);
-            gc.strokePolygon(xs, ys, 4);
+        double[] xs = {x, x + 42, x, x - 42};
+        double[] ys = {y - 26, y, y + 26, y};
+        gc.fillPolygon(xs, ys, 4);
+        gc.strokePolygon(xs, ys, 4);
         } else {
-            gc.fillOval(x-NR, y-NR, NR*2, NR*2);
-            gc.strokeOval(x-NR, y-NR, NR*2, NR*2);
+            gc.fillOval(x - NR, y - NR, NR * 2, NR * 2);
+            gc.strokeOval(x - NR, y - NR, NR * 2, NR * 2);
         }
 
-        String name = el.getName().length() > 14
-            ? el.getName().substring(0, 13) + "…" : el.getName();
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 11));
-        gc.fillText(name, x - name.length() * 3.0, y + 3);
+        String name = shortName(el.getName());
 
-        // Occupancy below
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Sans", FontWeight.BOLD, 10));
+
+        if (el instanceof Passage && name.contains(" ")) {
+            String[] parts = name.split(" ", 2);
+            gc.fillText(parts[0], x - parts[0].length() * 2.8, y - 3);
+            gc.fillText(parts[1], x - parts[1].length() * 2.8, y + 10);
+        } else {
+            gc.fillText(name, x - name.length() * 2.8, y + 3);
+        }
         String occ = el.getCurrentOccupancy() + "/" + el.getMaxCapacity();
+
         gc.setFill(Color.web("#eeeeee"));
         gc.setFont(Font.font("Sans", 8));
-        gc.fillText(occ, x - occ.length() * 2.2,
-            y + (el instanceof Exit ? 24 : NR + 11));
+        gc.fillText(
+            occ,
+            x - occ.length() * 2.2,
+            y + (el instanceof Exit ? 24 : NR + 11)
+        );
+    }
+
+    private String shortName(String name) {
+        return switch (name) {
+            case "Jonction Centrale" -> "J. Centrale";
+            case "Jonction Nord" -> "J. Nord";
+            case "Jonction Sud" -> "J. Sud";
+            case "Palier Esc. 1" -> "P. Esc. 1";
+            case "Palier Esc. 2" -> "P. Esc. 2";
+            default -> name.length() > 14 ? name.substring(0, 13) + "…" : name;
+        };
     }
 
     private void drawAgent(GraphicsContext gc, double x, double y, Agent a, boolean selected) {
         Color c = a.getState() == AgentState.PANICKED
-            ? Color.web("#f44336") : Color.web("#1565c0");
+            ? Color.web("#f44336")
+            : Color.web("#1565c0");
+
         if (selected) {
             gc.setFill(Color.web("#ff980066"));
             gc.fillOval(x - 14, y - 18, 28, 28);
         }
-        gc.setStroke(c); gc.setFill(c); gc.setLineWidth(1.8);
-        gc.fillOval(x-4, y-13, 8, 8);
-        gc.strokeLine(x, y-5, x, y+6);
-        gc.strokeLine(x-5, y, x+5, y);
-        gc.strokeLine(x, y+6, x-4, y+13);
-        gc.strokeLine(x, y+6, x+4, y+13);
+
+        gc.setStroke(c);
+        gc.setFill(c);
+        gc.setLineWidth(1.8);
+
+        gc.fillOval(x - 4, y - 13, 8, 8);
+        gc.strokeLine(x, y - 5, x, y + 6);
+        gc.strokeLine(x - 5, y, x + 5, y);
+        gc.strokeLine(x, y + 6, x - 4, y + 13);
+        gc.strokeLine(x, y + 6, x + 4, y + 13);
     }
 
     // ── Mouse handlers ────────────────────────────────────
@@ -752,14 +809,25 @@ public class AdminView {
     }
 
     private void initPositions() {
-        put("Réserve", 110, 80);      put("Bureau 1", 110, 175);
-        put("Bureau 2", 110, 270);    put("Bureau 3", 110, 365);
-        put("Escalier 1", 250, 80);   put("Couloir Nord", 360, 170);
-        put("LT Serveurs", 510, 100); put("Escalier 2", 420, 245);
-        put("Hall Central", 510, 340);
-        put("Sortie Ouest", 80, 440);    put("Amphithéâtre", 230, 440);
-        put("Couloir Sud", 410, 440);    put("Logement", 570, 440);
-        put("Sortie Est 1", 660, 220);   put("Sortie Est 2", 660, 340);
+        put("Réserve", 110, 80);
+        put("Bureau 1", 110, 175);
+        put("Bureau 2", 110, 270);
+        put("Bureau 3", 110, 365);
+
+        put("Palier Esc. 1", 250, 80);
+        put("Jonction Nord", 360, 170);
+        put("Palier Esc. 2", 420, 245);
+
+        put("LT Serveurs", 510, 100);
+        put("Jonction Centrale", 510, 340);
+
+        put("Sortie Ouest", 80, 440);
+        put("Amphithéâtre", 230, 440);
+        put("Jonction Sud", 410, 440);
+        put("Logement", 570, 440);
+
+        put("Sortie Est 1", 660, 220);
+        put("Sortie Est 2", 660, 340);
         put("Sortie Est 3", 660, 430);
     }
 
