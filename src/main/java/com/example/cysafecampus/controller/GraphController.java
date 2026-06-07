@@ -355,15 +355,22 @@ public class GraphController {
     }
 
     private double[] generateFreePosition() {
-        double x;
-        double y;
-        int attempts = 0;
+        double x = 0;
+        double y = 0;
 
-        do {
-            x = 80 + Math.random() * 650;
-            y = 70 + Math.random() * 380;
-            attempts++;
-        } while (isTooCloseToExistingNode(x, y) && attempts < 100);
+        for (int attempts = 0; attempts < 500; attempts++) {
+            x = 100 + Math.random() * 620;
+            y = 80 + Math.random() * 360;
+
+            if (!isTooCloseToExistingNode(x, y)) {
+                return new double[]{x, y};
+            }
+        }
+
+        // Si aucune place parfaite trouvée, on décale progressivement
+        int count = graph.getElements().size();
+        x = 120 + (count * 90) % 650;
+        y = 90 + ((count * 90) / 650) * 90;
 
         return new double[]{x, y};
     }
@@ -372,10 +379,16 @@ public class GraphController {
         for (BuildingElement el : graph.getElements()) {
             if (el.getName().contains("↔")) continue;
 
-            double dx = el.getX() - x;
-            double dy = el.getY() - y;
+            double ex = el.getX();
+            double ey = el.getY();
 
-            if (Math.sqrt(dx * dx + dy * dy) < 85) {
+            // Ignore uniquement les éléments qui n'ont vraiment pas de position
+            if (ex == 0.0 && ey == 0.0) continue;
+
+            double dx = ex - x;
+            double dy = ey - y;
+
+            if (Math.sqrt(dx * dx + dy * dy) < 120) {
                 return true;
             }
         }
