@@ -152,11 +152,13 @@ public class ObserverView {
         GraphicsContext gc = canvas.getGraphicsContext2D();
         Graph graph = controller.getGraph();
 
+        syncPositionsFromModel();
+
         gc.clearRect(0, 0, CW, CH);
         gc.setFill(Color.WHITE);
         gc.fillRect(0, 0, CW, CH);
 
-        drawDefaultEdges(gc);
+        drawEdgesFromModel(gc);
 
         for (BuildingElement el : graph.getElements()) {
             if (el.getName().contains("↔")) continue;
@@ -171,6 +173,94 @@ public class ObserverView {
             javafx.geometry.Point2D p = agentPos(a);
             if (p != null) {
                 drawAgent(gc, p.getX(), p.getY(), a);
+            }
+        }
+    }
+
+
+    private void drawEdgesFromModel(GraphicsContext gc) {
+        gc.setStroke(Color.web("#455a64"));
+        gc.setLineWidth(3.0);
+
+        for (Passage passage : controller.getGraph().getPassages()) {
+            for (Door door : passage.getConnectedDoors()) {
+                Room room = door.getRoom();
+
+                if (room == null) continue;
+
+                javafx.geometry.Point2D passagePos = getPositionForElement(passage);
+                javafx.geometry.Point2D roomPos = getPositionForElement(room);
+
+                if (passagePos == null || roomPos == null) continue;
+
+                gc.strokeLine(
+                    passagePos.getX(),
+                    passagePos.getY(),
+                    roomPos.getX(),
+                    roomPos.getY()
+                );
+            }
+        }
+    }
+
+    private javafx.geometry.Point2D getPositionForElement(BuildingElement el) {
+        if (el.getName().contains("↔")) {
+            return getJunctionPosition(el);
+        }
+
+        javafx.geometry.Point2D p = pos.get(el.getName());
+
+        if (p != null) {
+            return p;
+        }
+
+        if (el.getX() != 0.0 || el.getY() != 0.0) {
+            p = new javafx.geometry.Point2D(el.getX(), el.getY());
+            pos.put(el.getName(), p);
+            return p;
+        }
+
+        return null;
+    }
+
+    private javafx.geometry.Point2D getJunctionPosition(BuildingElement junction) {
+        String name = junction.getName();
+
+        if (!name.contains("↔")) {
+            return pos.get(name);
+        }
+
+        String[] parts = name.split("↔");
+
+        if (parts.length != 2) {
+            return null;
+        }
+
+        javafx.geometry.Point2D a = pos.get(parts[0]);
+        javafx.geometry.Point2D b = pos.get(parts[1]);
+
+        if (a == null || b == null) {
+            return null;
+        }
+
+        return new javafx.geometry.Point2D(
+            (a.getX() + b.getX()) / 2.0,
+            (a.getY() + b.getY()) / 2.0
+        );
+    }
+
+
+    private void syncPositionsFromModel() {
+        pos.keySet().removeIf(name ->
+            controller.getGraph().getElements().stream()
+                .noneMatch(el -> el.getName().equals(name))
+        );
+
+        for (BuildingElement el : controller.getGraph().getElements()) {
+            if (el.getName().contains("↔")) continue;
+
+            if (!pos.containsKey(el.getName()) && (el.getX() != 0.0 || el.getY() != 0.0)) {
+                pos.put(el.getName(), new javafx.geometry.Point2D(el.getX(), el.getY()));
             }
         }
     }
