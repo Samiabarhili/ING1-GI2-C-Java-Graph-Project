@@ -250,6 +250,13 @@ public class ObserverView {
     }
 
 
+    public void refreshAfterReset() {
+        pos.clear();
+        initPositions();
+        draw();
+    }
+
+
     private void syncPositionsFromModel() {
         pos.keySet().removeIf(name ->
             controller.getGraph().getElements().stream()
