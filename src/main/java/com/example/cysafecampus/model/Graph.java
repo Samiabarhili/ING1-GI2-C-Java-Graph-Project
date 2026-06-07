@@ -30,6 +30,8 @@ public class Graph implements Subject, Serializable {
     /** Observers for building-wide alerts (agents implementing Observer) */
     private List<Observer> observers;
 
+    private boolean emergencyActive = false;
+
     public Graph() {
         this.elements = new ArrayList<>();
         this.passages = new ArrayList<>();
@@ -104,11 +106,12 @@ public class Graph implements Subject, Serializable {
      * @param state alert type ("FIRE", "NORMAL", etc.)
      */
     public void triggerAlert(String state) {
+        this.emergencyActive = !"NORMAL".equalsIgnoreCase(state);
+
         for (Observer observer : observers) {
             observer.update(state);
         }
     }
-
     // ── Utilities ─────────────────────────────────────────
 
     /**
@@ -133,5 +136,10 @@ public class Graph implements Subject, Serializable {
         for (Sensor sensor : sensors) {
             sensor.detect();
         }
+    }
+
+
+    public boolean isEmergencyActive() {
+        return emergencyActive;
     }
 }
