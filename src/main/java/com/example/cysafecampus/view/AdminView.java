@@ -643,7 +643,7 @@ public class AdminView {
         TextField xF = new TextField(String.valueOf((int) freePos[0]));
         TextField yF = new TextField(String.valueOf((int) freePos[1]));
         ComboBox<String> typeB = new ComboBox<>();
-        typeB.getItems().addAll("Salle", "Sortie", "Couloir"); typeB.getSelectionModel().selectFirst();
+        typeB.getItems().addAll("Bureau", "Amphi", "Salle", "Sortie"); typeB.getSelectionModel().selectFirst();
         dialog("Ajouter un nœud", grid("Nom:", nameF, "Type:", typeB, "X:", xF, "Y:", yF), () -> {
             try {
                 String n = nameF.getText().trim();
