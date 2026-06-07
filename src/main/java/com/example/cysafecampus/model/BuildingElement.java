@@ -12,6 +12,8 @@ public abstract class BuildingElement implements Serializable {
     private int currentOccupancy;
     private BlockStatus status;
     private double attractivenessScore;
+    private double x;
+    private double y;
 
     /** Total agents that have passed through this element (for statistics) */
     private int totalAgentsPassed;
@@ -27,6 +29,8 @@ public abstract class BuildingElement implements Serializable {
         this.attractivenessScore = 0.0;
         this.totalAgentsPassed = 0;
         this.totalSpeedSum = 0.0;
+        this.x = 0.0;
+        this.y = 0.0;
     }
 
     public String getName() { return name; }
@@ -35,7 +39,10 @@ public abstract class BuildingElement implements Serializable {
     public BlockStatus getStatus() { return status; }
     public double getAttractivenessScore() { return attractivenessScore; }
     public int getTotalAgentsPassed() { return totalAgentsPassed; }
-
+    public double getX() { return x; }
+    public double getY() { return y; }
+     
+        
     /** Returns average speed of agents that passed through, or 0 if none. */
     public double getAverageSpeed() {
         return totalAgentsPassed > 0 ? totalSpeedSum / totalAgentsPassed : 0.0;
@@ -45,7 +52,8 @@ public abstract class BuildingElement implements Serializable {
     public void setMaxCapacity(int maxCapacity) { this.maxCapacity = maxCapacity; }
     public void setAttractivenessScore(double score) { this.attractivenessScore = score; }
     public void setStatus(BlockStatus status) { this.status = status; }
-
+    
+    public void setPosition(double x, double y) { this.x = x; this.y = y; }
     /**
      * Sets current occupancy directly (used by serializer).
      */
