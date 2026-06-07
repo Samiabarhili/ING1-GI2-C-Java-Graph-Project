@@ -89,9 +89,12 @@ public class AdminView {
         canvas = new Canvas(CW, CH);
         setupMouseHandlers();
         setupContextMenu();
-        StackPane canvasPane = new StackPane(canvas);
-        canvasPane.setBackground(bg("white"));
 
+        StackPane canvasPane = new StackPane(canvas);
+        canvasPane.setBackground(bg("#0f172a"));
+        canvasPane.setMinSize(CW, CH);
+        canvasPane.setPrefSize(CW, CH);
+        canvasPane.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         // ── Right panel ───────────────────────────────────
         VBox rightPanel = buildRightPanel();
         rightPanel.setPrefWidth(250);
@@ -278,7 +281,7 @@ public class AdminView {
         Graph graph = controller.getGraph();
 
         gc.clearRect(0, 0, CW, CH);
-        gc.setFill(Color.WHITE);
+        gc.setFill(Color.web("#0f172a"));
         gc.fillRect(0, 0, CW, CH);
 
         // ── Edges ─────────────────────────────────────────
