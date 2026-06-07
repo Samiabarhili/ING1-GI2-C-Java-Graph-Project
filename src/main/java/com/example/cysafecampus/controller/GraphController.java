@@ -285,31 +285,84 @@ public class GraphController {
 
     /** Adds random nodes and connects them. */
     public void addRandomNodes(int count) {
+        java.util.List<Passage> visiblePassages = graph.getPassages().stream()
+            .filter(p -> !p.getName().contains("↔"))
+            .toList();
+
+        if (visiblePassages.isEmpty()) {
+            return;
+        }
+
         for (int i = 0; i < count; i++) {
-            String name = "Node_" + System.currentTimeMillis() + "_" + i;
-            int randomType = (int) (Math.random() * 3);
-            if (randomType == 0) {
-                graph.addElement(new Room(name, 30, 1));
-            } else if (randomType == 1) {
-                Passage p = new Passage(name, 50, 1, 1.0, PassageType.CORRIDOR, 10.0);
-                graph.addElement(p);
-                graph.addPassage(p);
-            } else {
-                graph.addElement(new Exit(name, 100));
-            }
-        }
-        // Random edges
-        var rooms = graph.getElements().stream()
-            .filter(e -> e instanceof Room).map(e -> (Room) e).toList();
-        var passages = graph.getPassages();
-        for (Room room : rooms) {
-            if (!passages.isEmpty() && Math.random() > 0.5) {
-                Passage rp = passages.get((int) (Math.random() * passages.size()));
-                Door door = new Door(room, rp);
+            String name = "Salle_" + System.currentTimeMillis() + "_" + i;
+
+            double[] position = generateFreePosition();
+            double x = position[0];
+            double y = position[1];
+
+            Room room = new Room(name, 30, 1);
+            room.setPosition(x, y);
+            graph.addElement(room);
+
+            Passage nearestPassage = findNearestPassageByPosition(x, y);
+
+            if (nearestPassage != null) {
+                Door door = new Door(room, nearestPassage);
                 room.addDoor(door);
-                rp.addDoor(door);
+                nearestPassage.addDoor(door);
             }
         }
+
+        clearAgentRoutes();
+    }
+
+    private double[] generateFreePosition() {
+        double x;
+        double y;
+        int attempts = 0;
+
+        do {
+            x = 80 + Math.random() * 650;
+            y = 70 + Math.random() * 380;
+            attempts++;
+        } while (isTooCloseToExistingNode(x, y) && attempts < 100);
+
+        return new double[]{x, y};
+    }
+
+    private boolean isTooCloseToExistingNode(double x, double y) {
+        for (BuildingElement el : graph.getElements()) {
+            if (el.getName().contains("↔")) continue;
+
+            double dx = el.getX() - x;
+            double dy = el.getY() - y;
+
+            if (Math.sqrt(dx * dx + dy * dy) < 85) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Passage findNearestPassageByPosition(double x, double y) {
+        Passage nearest = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (Passage passage : graph.getPassages()) {
+            if (passage.getName().contains("↔")) continue;
+
+            double dx = passage.getX() - x;
+            double dy = passage.getY() - y;
+            double distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                nearest = passage;
+            }
+        }
+
+        return nearest;
     }
 
     // ── Edge Management ───────────────────────────────────
