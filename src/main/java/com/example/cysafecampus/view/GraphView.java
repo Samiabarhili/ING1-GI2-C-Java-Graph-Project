@@ -31,7 +31,9 @@ public class GraphView {
 
     // Dark theme palette
     private static final Color BG          = Color.web("#0f0f1a");
-    private static final Color EDGE_COLOR  = Color.web("#2a2a4a");
+    private static final Color EDGE_COLOR  = Color.web("#5c6bc0");
+    private static final Color EDGE_DENSE  = Color.web("#ff9800");
+    private static final Color EDGE_FULL   = Color.web("#f44336");
     private static final Color TEXT_LIGHT  = Color.web("#e0e0ff");
     private static final Color TEXT_DIM    = Color.web("#7070a0");
     private static final Color COL_GREEN   = Color.web("#1b5e20");
@@ -131,14 +133,17 @@ public class GraphView {
             legendDot(COL_ORANGE,  "Dense"),
             legendDot(COL_RED,     "Saturé"),
             legendDot(COL_EXIT,    "Sortie"),
-            legendDot(COL_PASSAGE, "Couloir"));
+            legendDot(EDGE_COLOR,  "Arête / passage")
+        );
         legend.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
-        Region sp2 = new Region(); HBox.setHgrow(sp2, Priority.ALWAYS);
+        Region sp2 = new Region();
+        HBox.setHgrow(sp2, Priority.ALWAYS);
 
         HBox bottomBar = new HBox(10,
             playPauseBtn, stepBtn, sp2,
-            speedLbl, speedSlider, sp2, legend);
+            speedLbl, speedSlider, legend);
+            
         bottomBar.setPadding(new Insets(8, 14, 8, 14));
         bottomBar.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         bottomBar.setStyle("-fx-background-color:#0f0f1a;-fx-border-color:#1a1a3a;-fx-border-width:1 0 0 0;");
@@ -170,34 +175,17 @@ public class GraphView {
         gc.setFill(BG);
         gc.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-        // ── Edges ─────────────────────────────────────────
-        // Draw passage→room connections, skip junction nodes (↔)
-        gc.setLineWidth(1.5);
-        for (Passage passage : graph.getPassages()) {
-            if (passage.getName().contains("↔")) continue;
-            Point2D pp = nodePositions.get(passage.getName());
-            if (pp == null) continue;
+        // ── Edges / Connections ───────────────────────────
+        drawDefaultPlanEdges(gc);
 
-            for (Door door : passage.getConnectedDoors()) {
-                Room room = door.getRoom();
-                if (room.getName().contains("↔")) continue;
-                Point2D rp = nodePositions.get(room.getName());
-                if (rp == null) continue;
 
-                // Gradient-like: dimmer lines
-                double density = passage.getMaxCapacity() > 0
-                    ? (double) passage.getCurrentOccupancy() / passage.getMaxCapacity() : 0;
-                gc.setStroke(density > 0.5
-                    ? Color.web("#4a2020") : EDGE_COLOR);
-                gc.strokeLine(pp.getX(), pp.getY(), rp.getX(), rp.getY());
-            }
-        }
-
-        // ── Nodes ─────────────────────────────────────────
+       // Nodes — rooms, exits and junctions
         for (BuildingElement el : graph.getElements()) {
             if (el.getName().contains("↔")) continue;
-            Point2D pos = nodePositions.get(el.getName());
+
+            Point2D pos = getOrCreate(el);
             if (pos == null) continue;
+
             drawNode(gc, el, pos);
         }
 
@@ -211,6 +199,38 @@ public class GraphView {
         if (tickLabel != null)
             tickLabel.setText("Tick: " + controller.getTickCount());
     }
+    private void drawDefaultPlanEdges(GraphicsContext gc) {
+        gc.setStroke(EDGE_COLOR);
+        gc.setLineWidth(5.0);
+
+        // Réserve -> Palier Esc. 1 -> Jonction Nord
+        gc.strokeLine(90, 80, 260, 80);
+        gc.strokeLine(260, 80, 330, 230);
+
+        // Bureaux -> Jonction Nord
+        gc.strokeLine(90, 180, 330, 230);
+        gc.strokeLine(90, 280, 330, 230);
+
+        // Jonction Nord -> Palier Esc. 2 -> Jonction Centrale
+        gc.strokeLine(330, 230, 470, 230);
+        gc.strokeLine(470, 230, 600, 310);
+
+        // Salles centrales -> Jonction Centrale
+        gc.strokeLine(600, 110, 600, 310);
+        gc.strokeLine(90, 380, 600, 310);
+
+        // Jonction Centrale -> sorties Est
+        gc.strokeLine(600, 310, 820, 190);
+        gc.strokeLine(600, 310, 820, 310);
+        gc.strokeLine(600, 310, 820, 430);
+
+        // Partie Sud
+        gc.strokeLine(300, 500, 500, 500);
+        gc.strokeLine(700, 500, 500, 500);
+        gc.strokeLine(500, 500, 600, 310);
+        gc.strokeLine(90, 500, 500, 500);
+    }
+
 
     private void drawNode(GraphicsContext gc, BuildingElement el, Point2D pos) {
         double x = pos.getX(), y = pos.getY();
@@ -219,7 +239,7 @@ public class GraphView {
 
         gc.setFill(fill);
         gc.setStroke(stroke);
-        gc.setLineWidth(1.5);
+        gc.setLineWidth(3);
 
         if (el instanceof Exit) {
             // Rounded rect
@@ -227,8 +247,8 @@ public class GraphView {
             gc.strokeRoundRect(x - 38, y - 16, 76, 32, 12, 12);
         } else if (el instanceof Passage) {
             // Diamond
-            double[] xs = {x, x + 30, x, x - 30};
-            double[] ys = {y - 18, y, y + 18, y};
+            double[] xs = {x, x + 42, x, x - 42};
+            double[] ys = {y - 26, y, y + 26, y};
             gc.fillPolygon(xs, ys, 4);
             gc.strokePolygon(xs, ys, 4);
         } else {
@@ -320,37 +340,49 @@ public class GraphView {
 
     /** Node positions calibrated to match the CY Tech Rez-de-chaussée floor plan. */
     private void initDefaultPositions() {
-        // Left column — offices
-        put("Réserve",       90,  70);
-        put("Bureau 1",      90, 170);
-        put("Bureau 2",      90, 270);
-        put("Bureau 3",      90, 360);
-        // Top center
-        put("Escalier 1",   230,  70);
-        put("Couloir Nord", 330, 155);
-        put("LT Serveurs",  480, 100);
-        put("Escalier 2",   400, 230);
-        // Center — hall
-        put("Hall Central", 480, 320);
-        // Bottom row
-        put("Sortie Ouest",  70, 460);
-        put("Amphithéâtre", 210, 460);
-        put("Couloir Sud",  390, 460);
-        put("Logement",     560, 460);
-        // Right — exits
-        put("Sortie Est 1", 760, 220);
-        put("Sortie Est 2", 760, 320);
-        put("Sortie Est 3", 760, 420);
-    }
+        put("Réserve", 90, 80);
+        put("Bureau 1", 90, 180);
+        put("Bureau 2", 90, 280);
+        put("Bureau 3", 90, 380);
 
+        put("Palier Esc. 1", 260, 80);
+        put("Jonction Nord", 330, 230);
+        put("Palier Esc. 2", 470, 230);
+
+        put("LT Serveurs", 600, 110);
+        put("Jonction Centrale", 600, 310);
+
+        put("Sortie Est 1", 820, 190);
+        put("Sortie Est 2", 820, 310);
+        put("Sortie Est 3", 820, 430);
+
+        put("Sortie Ouest", 90, 500);
+        put("Amphithéâtre", 300, 500);
+        put("Jonction Sud", 500, 500);
+        put("Logement", 700, 500);
+    }
     private void put(String name, double x, double y) {
         nodePositions.putIfAbsent(name, new Point2D(x, y));
     }
 
     private Point2D getOrCreate(BuildingElement el) {
-        return nodePositions.computeIfAbsent(el.getName(),
-            k -> new Point2D(100 + Math.random() * 660, 60 + Math.random() * 400));
+        Point2D existing = nodePositions.get(el.getName());
+        if (existing != null) {
+            return existing;
+        }
+
+        if (el.getX() != 0.0 || el.getY() != 0.0) {
+            Point2D fromModel = new Point2D(el.getX(), el.getY());
+            nodePositions.put(el.getName(), fromModel);
+            return fromModel;
+        }
+
+        Point2D random = new Point2D(100 + Math.random() * 660, 60 + Math.random() * 400);
+        nodePositions.put(el.getName(), random);
+        el.setPosition(random.getX(), random.getY());
+        return random;
     }
+
 
     // ── Context menu ──────────────────────────────────────
 
