@@ -449,81 +449,128 @@ public class GraphController {
      */
     private void initGraph() {
         // ── Rooms ──────────────────────────────────────────
-        Room storage     = new Room("Réserve",       20, 1, RoomType.OFFICE);
-        Room office1     = new Room("Bureau 1",      15, 1, RoomType.OFFICE);
-        Room office2     = new Room("Bureau 2",      15, 1, RoomType.OFFICE);
-        Room office3     = new Room("Bureau 3",      15, 1, RoomType.OFFICE);
-        Room serverRoom  = new Room("LT Serveurs",   10, 1, RoomType.OFFICE);
-        Room amphitheater       = new Room("Amphithéâtre", 200, 1, RoomType.AMPHITHEATER);
+        Room storage    = new Room("Réserve",       20, 1, RoomType.OFFICE);
+        Room office1    = new Room("Bureau 1",      15, 1, RoomType.OFFICE);
+        Room office2    = new Room("Bureau 2",      15, 1, RoomType.OFFICE);
+        Room office3    = new Room("Bureau 3",      15, 1, RoomType.OFFICE);
+        Room serverRoom = new Room("LT Serveurs",   10, 1, RoomType.OFFICE);
+        Room amphitheater = new Room("Amphithéâtre", 200, 1, RoomType.AMPHITHEATER);
         Room housing    = new Room("Logement",      10, 1, RoomType.OFFICE);
 
-        // ── Passages ───────────────────────────────────────
-        Passage mainHall = new Passage("Hall Central",  100, 1, 1.0, PassageType.HALL,     20.0);
-        Passage northCorridor    = new Passage("Couloir Nord",   40, 1, 1.0, PassageType.CORRIDOR, 10.0);
-        Passage southCorridor    = new Passage("Couloir Sud",    40, 1, 1.0, PassageType.CORRIDOR, 10.0);
-        Passage staircase1   = new Passage("Escalier 1",    20, 1, 0.6, PassageType.STAIRCASE,  8.0);
-        Passage staircase2   = new Passage("Escalier 2",    20, 1, 0.6, PassageType.STAIRCASE,  8.0);
+        // ── Junctions / Passages ───────────────────────────
+        // These elements are graph nodes representing intersections/paliers.
+        // The visual edges between them represent corridors/passages.
+        Passage mainHall      = new Passage("Jonction Centrale", 100, 3, 1.0, PassageType.HALL,      12.0);
+        Passage northJunction = new Passage("Jonction Nord",      40, 2, 1.0, PassageType.CORRIDOR,  10.0);
+        Passage southJunction = new Passage("Jonction Sud",       40, 2, 1.0, PassageType.CORRIDOR,  10.0);
+        Passage staircase1    = new Passage("Palier Esc. 1",      20, 1, 0.6, PassageType.STAIRCASE,  8.0);
+        Passage staircase2    = new Passage("Palier Esc. 2",      20, 1, 0.6, PassageType.STAIRCASE,  8.0);
 
         // ── Exits ──────────────────────────────────────────
         Exit exitEast1 = new Exit("Sortie Est 1", 50);
         Exit exitEast2 = new Exit("Sortie Est 2", 50);
         Exit exitEast3 = new Exit("Sortie Est 3", 50);
-        Exit exitWest = new Exit("Sortie Ouest", 50);
+        Exit exitWest  = new Exit("Sortie Ouest", 50);
+
+        // ── Positions for graph view ───────────────────────
+        storage.setPosition(90, 80);
+        office1.setPosition(90, 180);
+        office2.setPosition(90, 280);
+        office3.setPosition(90, 380);
+
+        staircase1.setPosition(260, 80);
+        northJunction.setPosition(330, 230);
+        staircase2.setPosition(470, 230);
+
+        serverRoom.setPosition(600, 110);
+        mainHall.setPosition(600, 310);
+
+        exitEast1.setPosition(820, 190);
+        exitEast2.setPosition(820, 310);
+        exitEast3.setPosition(820, 430);
+
+        exitWest.setPosition(90, 520);
+        amphitheater.setPosition(300, 520);
+        southJunction.setPosition(500, 520);
+        housing.setPosition(700, 520);
 
         // ── Add to graph ───────────────────────────────────
         for (BuildingElement el : new BuildingElement[]{
             storage, office1, office2, office3, serverRoom, amphitheater, housing,
-            mainHall, northCorridor, southCorridor, staircase1, staircase2,
+            mainHall, northJunction, southJunction, staircase1, staircase2,
             exitEast1, exitEast2, exitEast3, exitWest
-        }) { graph.addElement(el); }
+        }) {
+            graph.addElement(el);
+        }
 
         graph.addPassage(mainHall);
-        graph.addPassage(northCorridor);
-        graph.addPassage(southCorridor);
+        graph.addPassage(northJunction);
+        graph.addPassage(southJunction);
         graph.addPassage(staircase1);
         graph.addPassage(staircase2);
 
-        // ── Doors (connections) ────────────────────────────
-        connectRoomToPassage(storage,    staircase1);
-        connectRoomToPassage(office1,    northCorridor);
-        connectRoomToPassage(office2,    northCorridor);
-        connectRoomToPassage(office3,    mainHall);
+        // ── Doors / graph connections ──────────────────────
+        // North part
+        connectRoomToPassage(storage, staircase1);
+        connectPassageToPassage(staircase1, northJunction);
+
+        connectRoomToPassage(office1, northJunction);
+        connectRoomToPassage(office2, northJunction);
+
+        connectPassageToPassage(northJunction, staircase2);
+        connectPassageToPassage(staircase2, mainHall);
+
+        // Central part
         connectRoomToPassage(serverRoom, mainHall);
-        connectRoomToPassage(amphitheater, southCorridor);
-        connectRoomToPassage(housing,    southCorridor);
+        connectRoomToPassage(office3, mainHall);
 
-        connectRoomToPassage(exitEast1,  mainHall);
-        connectRoomToPassage(exitEast2,  mainHall);
-        connectRoomToPassage(exitEast3,  mainHall);
-        connectRoomToPassage(exitWest,   southCorridor);
+        connectRoomToPassage(exitEast1, mainHall);
+        connectRoomToPassage(exitEast2, mainHall);
+        connectRoomToPassage(exitEast3, mainHall);
 
-        // Hall central connects to all corridors
-        connectPassageToPassage(mainHall, northCorridor);
-        connectPassageToPassage(mainHall, southCorridor);
-        connectPassageToPassage(mainHall, staircase2);
-        connectPassageToPassage(northCorridor, staircase1);
+        // South part
+        connectRoomToPassage(amphitheater, southJunction);
+        connectRoomToPassage(housing, southJunction);
+        connectPassageToPassage(southJunction, mainHall);
 
-        // ── Sensors (one per room)
-        PresenceSensor ps1 = new PresenceSensor("PS-Amphi",   amphitheater);
-        PresenceSensor ps2 = new PresenceSensor("PS-B1",      office1);
-        SmokeSensor    ss1 = new SmokeSensor("SS-LT",         serverRoom, 30.0);
-        SmokeSensor    ss2 = new SmokeSensor("SS-Hall",       mainHall, 40.0);
-        for (var s : new Sensor[]{ps1, ps2, ss1, ss2}) graph.addSensor(s);
+        // West emergency exit
+        connectRoomToPassage(exitWest, southJunction);
+        // ── Sensors ────────────────────────────────────────
+        PresenceSensor ps1 = new PresenceSensor("PS-Amphi", amphitheater);
+        PresenceSensor ps2 = new PresenceSensor("PS-B1", office1);
+        SmokeSensor ss1 = new SmokeSensor("SS-LT", serverRoom, 30.0);
+        SmokeSensor ss2 = new SmokeSensor("SS-Jonction Centrale", mainHall, 40.0);
+
+        for (var s : new Sensor[]{ps1, ps2, ss1, ss2}) {
+            graph.addSensor(s);
+        }
 
         // ── Agents ─────────────────────────────────────────
-        Person p1 = new Person("Lucas",  office1, 1.0, Behavior.POLITE,    0.6);
-        Person p2 = new Person("Samia",  office2, 1.2, Behavior.FOLLOWER,  0.8);
-        Person p3 = new Person("Theo",   amphitheater,   0.9, Behavior.RUDE,      0.4);
-        Person p4 = new Person("Ines",   office3, 1.1, Behavior.POLITE,    0.7);
+        Person p1 = new Person("Lucas", office1, 1.0, Behavior.POLITE, 0.6);
+        Person p2 = new Person("Samia", office2, 1.2, Behavior.FOLLOWER, 0.8);
+        Person p3 = new Person("Theo", amphitheater, 0.9, Behavior.RUDE, 0.4);
+        Person p4 = new Person("Malak", office3, 1.1, Behavior.POLITE, 0.7);
         SecurityAgent sec = new SecurityAgent("Agent 01", mainHall, mainHall);
 
         // Give agents a strategy and starting destination so they move immediately
-        p1.setStrategy(new EvacuateStrategy()); p1.setDestination(exitEast1);
-        p2.setStrategy(new EvacuateStrategy()); p2.setDestination(exitEast2);
-        p3.setStrategy(new EvacuateStrategy()); p3.setDestination(exitWest);
-        p4.setStrategy(new EvacuateStrategy()); p4.setDestination(exitEast3);
+        p1.setStrategy(new EvacuateStrategy());
+        p1.setDestination(exitEast1);
 
-        for (Agent a : new Agent[]{p1, p2, p3, p4, sec}) graph.addAgent(a);
+        p2.setStrategy(new EvacuateStrategy());
+        p2.setDestination(exitEast2);
+
+        p3.setStrategy(new EvacuateStrategy());
+        p3.setDestination(exitWest);
+
+        p4.setStrategy(new EvacuateStrategy());
+        p4.setDestination(exitEast3);
+
+        sec.setStrategy(new EvacuateStrategy());
+        sec.setDestination(exitEast2);
+
+        for (Agent a : new Agent[]{p1, p2, p3, p4, sec}) {
+            graph.addAgent(a);
+        }
     }
 
     /**
