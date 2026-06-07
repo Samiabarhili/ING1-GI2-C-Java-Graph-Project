@@ -846,18 +846,27 @@ public class AdminView {
         ComboBox<String> edgeB = new ComboBox<>();
 
         for (Passage passage : controller.getGraph().getPassages()) {
-            if (passage.getName().contains("↔")) continue;
-
             for (Door door : passage.getConnectedDoors()) {
                 Room room = door.getRoom();
 
                 if (room == null) continue;
-                if (room.getName().contains("↔")) continue;
 
-                String label = room.getName() + " → " + passage.getName();
+                if (room.getName().contains("↔")) {
+                    String[] parts = room.getName().split("↔");
 
-                if (!edgeB.getItems().contains(label)) {
-                    edgeB.getItems().add(label);
+                    if (parts.length == 2) {
+                        String label = parts[0] + " → " + parts[1];
+
+                        if (!edgeB.getItems().contains(label)) {
+                            edgeB.getItems().add(label);
+                        }
+                    }
+                } else {
+                    String label = room.getName() + " → " + passage.getName();
+
+                    if (!edgeB.getItems().contains(label)) {
+                        edgeB.getItems().add(label);
+                    }
                 }
             }
         }
