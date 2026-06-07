@@ -326,6 +326,10 @@ public class GraphView {
         styleStatus(false);
         playPauseBtn.setText("▶  Play");
         styleBtn(playPauseBtn, "#2e7d32", "#388e3c");
+
+        nodePositions.clear();
+        initDefaultPositions();
+
         drawGraphFromModel();
     }
 
