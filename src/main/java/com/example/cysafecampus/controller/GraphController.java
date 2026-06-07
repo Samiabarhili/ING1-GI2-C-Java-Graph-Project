@@ -135,14 +135,20 @@ public class GraphController {
     public void addNode(String name, String type, double x, double y) {
         BuildingElement node;
 
-        if (type.equalsIgnoreCase("Salle")) {
-            node = new Room(name, 30, 1);
+        if (type.equalsIgnoreCase("Bureau")) {
+            node = new Room(name, 30, 1, RoomType.OFFICE);
+
+        } else if (type.equalsIgnoreCase("Amphi")) {
+            node = new Room(name, 120, 1, RoomType.AMPHITHEATER);
+
+        } else if (type.equalsIgnoreCase("Salle")) {
+            node = new Room(name, 30, 1, RoomType.CLASSROOM);
+
         } else if (type.equalsIgnoreCase("Sortie")) {
             node = new Exit(name, 100);
+
         } else {
-            Passage passage = new Passage(name, 50, 1, 1.0, PassageType.CORRIDOR, 10.0);
-            node = passage;
-            graph.addPassage(passage);
+            node = new Room(name, 30, 1, RoomType.CLASSROOM);
         }
 
         node.setPosition(x, y);
