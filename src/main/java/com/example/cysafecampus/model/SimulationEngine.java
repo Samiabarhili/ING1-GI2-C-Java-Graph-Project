@@ -3,6 +3,7 @@ package com.example.cysafecampus.model;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.function.Consumer;
+import java.util.Comparator;
 
 /**
  * Core simulation engine — decoupled from JavaFX.
@@ -123,7 +124,31 @@ public class SimulationEngine {
         // 2. Agents — iterate on a snapshot to avoid ConcurrentModificationException
         List<Agent> snapshot = new ArrayList<>(graph.getAgents());
         for (Agent agent : snapshot) {
+            if (agent.isEvacuated()) {
+                continue;
+            }
+
             agent.move();
+
+            if (agent.getCurrentLocation() instanceof Exit) {
+                agent.setEvacuated(true);
+                agent.setDestination(null);
+                agent.setPath(new ArrayList<>());
+                agent.setProgress(0.0);
+                continue;
+            }
+
+            if (agent.getDestination() == null
+                    && agent.getCurrentLocation() != null) {
+
+                BuildingElement nearestExit = findNearestExit(agent);
+
+                if (nearestExit != null) {
+                    agent.setDestination(nearestExit);
+                    agent.setPath(new ArrayList<>());
+                    agent.setProgress(0.0);
+                }
+            }
         }
 
         // 3. Notify listeners (triggers view redraw via Platform.runLater in controller)
@@ -133,7 +158,25 @@ public class SimulationEngine {
     }
 
     // ── Observers ─────────────────────────────────────────
+    private BuildingElement findNearestExit(Agent agent) {
+        return graph.getElements().stream()
+            .filter(el -> el instanceof Exit)
+            .filter(el -> !el.isBlocked())
+            .min(Comparator.comparingDouble(exit -> {
+                List<BuildingElement> path = PathFinder.calculateFastestPath(
+                    agent.getCurrentLocation(),
+                    exit,
+                    agent.getMaxSpeed()
+                );
 
+                if (path == null || path.isEmpty()) {
+                    return Double.MAX_VALUE;
+                }
+
+                return path.size();
+            }))
+            .orElse(null);
+    }
     /**
      * Registers a tick listener.
      * @param listener called after each tick with the current tick count
