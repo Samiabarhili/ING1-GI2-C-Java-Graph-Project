@@ -43,6 +43,22 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
         // Blocked → recompute
         if (next.isBlocked()) {
             agent.setPath(new ArrayList<>());
+            agent.setProgress(0.0);
+            return;
+        }
+
+        if (next instanceof Passage && next.isFull() && agent.getBehavior() == Behavior.POLITE) {
+            List<BuildingElement> newPath = PathFinder.calculateFastestPath(
+                agent.getCurrentLocation(),
+                agent.getDestination(),
+                agent.getMaxSpeed()
+            );
+
+            if (!newPath.isEmpty()) {
+                agent.setPath(newPath);
+            }
+
+            agent.setWaitCycles(1);
             return;
         }
 
@@ -51,8 +67,26 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
 
             // Bottleneck — only agents with low density tolerance wait
             int maxLanes = Math.max(1, passage.getLanes());
-            if (passage.getCurrentOccupancy() >= maxLanes
-                    && agent.getDensityTolerance() < 0.5) {
+            double density = passage.getMaxCapacity() > 0
+                ? (double) passage.getCurrentOccupancy() / passage.getMaxCapacity()
+                : 0.0;
+
+            if (agent.getBehavior() == Behavior.POLITE && density > agent.getDensityTolerance()) {
+                agent.setWaitCycles(2);
+                return;
+            }
+
+            if (agent.getBehavior() == Behavior.FOLLOWER && passage.getCurrentOccupancy() >= maxLanes) {
+                agent.setWaitCycles(1);
+                return;
+            }
+
+            if (agent.getBehavior() == Behavior.RUDE && passage.getCurrentOccupancy() >= passage.getMaxCapacity()) {
+                agent.setWaitCycles(1);
+                return;
+            }
+
+            if (agent.getBehavior() != Behavior.RUDE && passage.getCurrentOccupancy() >= passage.getMaxCapacity()) {
                 agent.setWaitCycles(2);
                 return;
             }
@@ -100,7 +134,8 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
 
     protected void onArrival(Agent agent) {
         agent.setPath(new ArrayList<>());
-        agent.setDestination(null); // triggers reassignment in controller tick
+        agent.setDestination(null);
+        agent.setProgress(0.0);
     }
 
     @Override
