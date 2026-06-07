@@ -22,6 +22,7 @@ public abstract class Agent implements Observer, Serializable {
     private BuildingElement currentLocation;
     private BuildingElement destination;
     private MovementStrategy strategy;
+    private boolean evacuated;
 
     protected double maxSpeed;
     protected Behavior behavior;
@@ -56,6 +57,7 @@ public abstract class Agent implements Observer, Serializable {
         this.pathIndex = 0;
         this.progress = 0.0;
         this.waitCycles = 0;
+        this.evacuated = false;
     }
 
     // ── Getters ───────────────────────────────────────────
@@ -73,6 +75,8 @@ public abstract class Agent implements Observer, Serializable {
     public int getPathIndex() { return pathIndex; }
     public double getProgress() { return progress; }
     public int getWaitCycles() { return waitCycles; }
+    public boolean isEvacuated() { return evacuated; }
+
 
     // ── Setters ───────────────────────────────────────────
 
@@ -88,11 +92,16 @@ public abstract class Agent implements Observer, Serializable {
     public void setPathIndex(int pathIndex) { this.pathIndex = pathIndex; }
     public void setProgress(double progress) { this.progress = progress; }
     public void setWaitCycles(int waitCycles) { this.waitCycles = waitCycles; }
+    public void setEvacuated(boolean evacuated) { this.evacuated = evacuated; }
+
 
     /**
      * Executes one simulation tick via the current strategy.
      */
     public void move() {
+        if (evacuated) {
+            return;
+        }
         if (strategy != null) {
             strategy.execute(this);
         }
