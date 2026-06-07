@@ -275,6 +275,21 @@ public class GraphController {
         graph.removeElement(toRemove);
     }
 
+
+
+    public void updateNode(String oldName, String newName, int newCapacity) {
+        BuildingElement element = findElementByName(oldName);
+
+        if (element == null) {
+            return;
+        }
+
+        element.setName(newName);
+        element.setMaxCapacity(newCapacity);
+
+        clearAgentRoutes();
+    }
+
     /** Adds random nodes and connects them. */
     public void addRandomNodes(int count) {
         java.util.List<Passage> visiblePassages = graph.getPassages().stream()
