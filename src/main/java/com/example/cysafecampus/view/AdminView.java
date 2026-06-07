@@ -660,28 +660,70 @@ public class AdminView {
     }
 
     private void handleAddEdge() {
-        ComboBox<String> rB = new ComboBox<>(), pB = new ComboBox<>();
-        controller.getGraph().getElements().forEach(el -> {
-            if (el instanceof Room && !el.getName().contains("↔")) rB.getItems().add(el.getName());
-            if (el instanceof Passage && !el.getName().contains("↔")) pB.getItems().add(el.getName());
-        });
-        rB.getSelectionModel().selectFirst(); pB.getSelectionModel().selectFirst();
-        dialog("Ajouter arête", grid("Salle:", rB, "Couloir:", pB), () -> {
-            controller.addEdge(rB.getValue(), pB.getValue()); draw();
-        });
+        ComboBox<String> firstB = nodeCombo();
+        ComboBox<String> secondB = nodeCombo();
+
+        dialog("Ajouter une arête",
+            grid("Nœud 1:", firstB, "Nœud 2:", secondB), () -> {
+                if (firstB.getValue() == null || secondB.getValue() == null) {
+                    showErr("Sélection invalide");
+                    return;
+                }
+
+                if (firstB.getValue().equals(secondB.getValue())) {
+                    showErr("Impossible de relier un nœud à lui-même");
+                    return;
+                }
+
+                controller.addConnection(firstB.getValue(), secondB.getValue());
+                draw();
+            });
     }
 
     private void handleRemoveEdge() {
-        ComboBox<String> eB = new ComboBox<>();
-        controller.getGraph().getPassages().forEach(p ->
-            p.getConnectedDoors().stream().filter(d -> !d.getRoom().getName().contains("↔"))
-                .forEach(d -> eB.getItems().add(d.getRoom().getName() + " → " + p.getName())));
-        eB.getSelectionModel().selectFirst();
-        dialog("Supprimer arête", grid("Arête:", eB), () -> {
-            if (eB.getValue() != null) {
-                String[] parts = eB.getValue().split(" → ");
-                controller.removeEdge(parts[0], parts[1]); draw();
+        ComboBox<String> edgeB = new ComboBox<>();
+
+        for (Passage passage : controller.getGraph().getPassages()) {
+            for (Door door : passage.getConnectedDoors()) {
+                Room room = door.getRoom();
+
+                if (room.getName().contains("↔")) {
+                    String[] parts = room.getName().split("↔");
+
+                    if (parts.length == 2) {
+                        String label = parts[0] + " → " + parts[1];
+
+                        if (!edgeB.getItems().contains(label)) {
+                            edgeB.getItems().add(label);
+                        }
+                    }
+                } else {
+                    String label = room.getName() + " → " + passage.getName();
+
+                    if (!edgeB.getItems().contains(label)) {
+                        edgeB.getItems().add(label);
+                    }
+                }
             }
+        }
+
+        edgeB.getSelectionModel().selectFirst();
+
+        dialog("Supprimer une arête", grid("Arête:", edgeB), () -> {
+            if (edgeB.getValue() == null) {
+                showErr("Aucune arête sélectionnée");
+                return;
+            }
+
+            String[] parts = edgeB.getValue().split(" → ");
+
+            if (parts.length != 2) {
+                showErr("Arête invalide");
+                return;
+            }
+
+            controller.removeEdge(parts[0], parts[1]);
+            draw();
         });
     }
 
