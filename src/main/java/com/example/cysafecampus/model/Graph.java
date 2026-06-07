@@ -143,4 +143,3 @@ public class Graph implements Subject, Serializable {
         return emergencyActive;
     }
 }
-
