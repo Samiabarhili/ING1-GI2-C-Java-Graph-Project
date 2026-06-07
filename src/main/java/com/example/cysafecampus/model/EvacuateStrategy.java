@@ -62,6 +62,32 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
             return;
         }
 
+        // Move progressively from a room/exit to a passage node.
+        // Without this block, agents teleport directly from rooms to junctions.
+        if (next instanceof Passage && !(agent.getCurrentLocation() instanceof Passage)) {
+            Passage passage = (Passage) next;
+
+            if (passage.getCurrentOccupancy() >= passage.getMaxCapacity()
+                    && agent.getBehavior() != Behavior.RUDE) {
+                agent.setWaitCycles(2);
+                return;
+            }
+
+            double step = agent.getMaxSpeed() / 10.0;
+            agent.setProgress(agent.getProgress() + step);
+
+            if (agent.getProgress() >= 1.0) {
+                agent.getCurrentLocation().agentLeaves();
+                passage.agentEnters(agent.getMaxSpeed());
+
+                agent.setCurrentLocation(passage);
+                agent.setPathIndex(idx + 1);
+                agent.setProgress(0.0);
+            }
+
+            return;
+        }
+
         if (next instanceof Passage) {
             Passage passage = (Passage) next;
 
