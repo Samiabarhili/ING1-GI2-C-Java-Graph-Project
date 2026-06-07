@@ -43,6 +43,10 @@ public class AdminView {
     private TextArea logArea;
     private Timeline uiRefresh;
 
+    private BuildingElement draggedNode = null;
+    private double dragOffsetX = 0;
+    private double dragOffsetY = 0;
+        
     // Selection state
     private BuildingElement selectedNode = null;
     private Agent selectedAgent = null;
@@ -515,13 +519,72 @@ public class AdminView {
     // ── Mouse handlers ────────────────────────────────────
 
     private void setupMouseHandlers() {
-        canvas.setOnMouseClicked(e -> {
-            double mx = e.getX(), my = e.getY();
 
-            // Check agent click first (smaller hit target)
+        canvas.setOnMousePressed(e -> {
+            double mx = e.getX();
+            double my = e.getY();
+
+            draggedNode = null;
+
+            for (BuildingElement el : controller.getGraph().getElements()) {
+                if (el.getName().contains("↔")) continue;
+
+                javafx.geometry.Point2D p = pos.get(el.getName());
+                if (p == null) continue;
+
+                double dist = Math.hypot(p.getX() - mx, p.getY() - my);
+
+                if (dist < NR + 8) {
+                    draggedNode = el;
+                    selectedNode = el;
+                    selectedAgent = null;
+
+                    dragOffsetX = mx - p.getX();
+                    dragOffsetY = my - p.getY();
+
+                    draw();
+                    break;
+                }
+            }
+        });
+
+        canvas.setOnMouseDragged(e -> {
+            if (draggedNode == null) return;
+
+            double newX = e.getX() - dragOffsetX;
+            double newY = e.getY() - dragOffsetY;
+
+            newX = Math.max(NR, Math.min(CW - NR, newX));
+            newY = Math.max(NR, Math.min(CH - NR, newY));
+
+            pos.put(draggedNode.getName(), new javafx.geometry.Point2D(newX, newY));
+            draggedNode.setPosition(newX, newY);
+
+            draw();
+        });
+
+        canvas.setOnMouseReleased(e -> {
+            if (draggedNode != null) {
+                draggedNode.setPosition(
+                    pos.get(draggedNode.getName()).getX(),
+                    pos.get(draggedNode.getName()).getY()
+                );
+            }
+
+            draggedNode = null;
+        });
+
+        canvas.setOnMouseClicked(e -> {
+            if (draggedNode != null) return;
+
+            double mx = e.getX();
+            double my = e.getY();
+
             Agent clickedAgent = null;
+
             for (Agent a : controller.getGraph().getAgents()) {
                 javafx.geometry.Point2D p = agentPos(a);
+
                 if (p != null && Math.hypot(p.getX() - mx, p.getY() - my) < 14) {
                     clickedAgent = a;
                     break;
@@ -535,14 +598,20 @@ public class AdminView {
                 return;
             }
 
-            // Check node click
             BuildingElement clickedNode = null;
+
             for (BuildingElement el : controller.getGraph().getElements()) {
                 if (el.getName().contains("↔")) continue;
+
                 javafx.geometry.Point2D p = pos.get(el.getName());
                 if (p == null) continue;
+
                 double dist = Math.hypot(p.getX() - mx, p.getY() - my);
-                if (dist < NR + 8) { clickedNode = el; break; }
+
+                if (dist < NR + 8) {
+                    clickedNode = el;
+                    break;
+                }
             }
 
             selectedNode = (selectedNode == clickedNode) ? null : clickedNode;
