@@ -73,9 +73,16 @@ public class GraphController {
      * Resets all agents to CALM state and clears fire alert.
      */
     public void reset() {
+        pause();
+
+        graph.getElements().clear();
+        graph.getPassages().clear();
+        graph.getAgents().clear();
+        graph.getSensors().clear();
+
         graph.triggerAlert("NORMAL");
-        engine.pause();
-        
+
+        initGraph();
     }
 
     // ── Save / Load ───────────────────────────────────────
