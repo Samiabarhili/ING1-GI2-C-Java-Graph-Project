@@ -105,8 +105,7 @@ public class ObserverView {
             legendItem(Color.web("#e65100"), "Dense"),
             legendItem(Color.web("#b71c1c"), "Saturé"),
             legendItem(Color.web("#0d47a1"), "Sortie"),
-            legendItem(Color.web("#283593"), "Passage"),
-            legendItem(Color.web("#1565c0"), "Agent calme"),
+            legendItem(Color.web("#283593"), "Jonction / palier"),            legendItem(Color.web("#1565c0"), "Agent calme"),
             legendItem(Color.web("#f44336"), "Agent paniqué")
         );
         legend.setPadding(new Insets(8, 14, 8, 14));
@@ -157,107 +156,172 @@ public class ObserverView {
         gc.setFill(Color.WHITE);
         gc.fillRect(0, 0, CW, CH);
 
-        // Edges
-        gc.setLineWidth(1.5);
-        for (Passage p : graph.getPassages()) {
-            if (p.getName().contains("↔")) continue;
-            javafx.geometry.Point2D pp = pos.get(p.getName());
-            if (pp == null) continue;
-            for (Door d : p.getConnectedDoors()) {
-                if (d.getRoom().getName().contains("↔")) continue;
-                javafx.geometry.Point2D rp = pos.get(d.getRoom().getName());
-                if (rp == null) continue;
-                double density = p.getMaxCapacity() > 0
-                    ? (double) p.getCurrentOccupancy() / p.getMaxCapacity() : 0;
-                if (density < 0.4) gc.setStroke(Color.web("#bdbdbd"));
-                else if (density < 0.8) gc.setStroke(Color.web("#ffb74d"));
-                else gc.setStroke(Color.web("#ef5350"));
-                gc.setLineWidth(density > 0.4 ? 2.5 : 1.5);
-                gc.strokeLine(pp.getX(), pp.getY(), rp.getX(), rp.getY());
-            }
-        }
+        drawDefaultEdges(gc);
 
-        // Nodes
         for (BuildingElement el : graph.getElements()) {
             if (el.getName().contains("↔")) continue;
+
             javafx.geometry.Point2D p = pos.get(el.getName());
             if (p == null) continue;
+
             drawNode(gc, el, p.getX(), p.getY());
         }
 
-        // Agents
         for (Agent a : graph.getAgents()) {
             javafx.geometry.Point2D p = agentPos(a);
-            if (p != null) drawAgent(gc, p.getX(), p.getY(), a);
+            if (p != null) {
+                drawAgent(gc, p.getX(), p.getY(), a);
+            }
         }
+    }
+
+    private void drawDefaultEdges(GraphicsContext gc) {
+        gc.setStroke(Color.web("#455a64"));
+        gc.setLineWidth(3.0);
+
+        drawEdge(gc, "Réserve", "Palier Esc. 1");
+        drawEdge(gc, "Palier Esc. 1", "Jonction Nord");
+
+        drawEdge(gc, "Bureau 1", "Jonction Nord");
+        drawEdge(gc, "Bureau 2", "Jonction Nord");
+
+        drawEdge(gc, "Jonction Nord", "Palier Esc. 2");
+        drawEdge(gc, "Palier Esc. 2", "Jonction Centrale");
+
+        drawEdge(gc, "LT Serveurs", "Jonction Centrale");
+        drawEdge(gc, "Bureau 3", "Jonction Centrale");
+
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 1");
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 2");
+        drawEdge(gc, "Jonction Centrale", "Sortie Est 3");
+
+        drawEdge(gc, "Amphithéâtre", "Jonction Sud");
+        drawEdge(gc, "Logement", "Jonction Sud");
+        drawEdge(gc, "Jonction Sud", "Jonction Centrale");
+        drawEdge(gc, "Sortie Ouest", "Jonction Sud");
+    }
+
+    private void drawEdge(GraphicsContext gc, String from, String to) {
+        javafx.geometry.Point2D a = pos.get(from);
+        javafx.geometry.Point2D b = pos.get(to);
+
+        if (a == null || b == null) {
+            System.out.println("Missing observer edge position: " + from + " -> " + to);
+            return;
+        }
+
+        gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
     }
 
     private void drawNode(GraphicsContext gc, BuildingElement el, double x, double y) {
         Color fill = nodeColor(el);
+
         gc.setFill(fill);
         gc.setStroke(Color.web("#9e9e9e"));
         gc.setLineWidth(1.2);
 
         if (el instanceof Exit) {
-            gc.fillRoundRect(x-46, y-16, 92, 32, 10, 10);
-            gc.strokeRoundRect(x-46, y-16, 92, 32, 10, 10);
+            gc.fillRoundRect(x - 46, y - 16, 92, 32, 10, 10);
+            gc.strokeRoundRect(x - 46, y - 16, 92, 32, 10, 10);
         } else if (el instanceof Passage) {
-            double[] xs = {x, x+26, x, x-26};
-            double[] ys = {y-16, y, y+16, y};
-            gc.fillPolygon(xs, ys, 4);
-            gc.strokePolygon(xs, ys, 4);
+        double[] xs = {x, x + 42, x, x - 42};
+        double[] ys = {y - 26, y, y + 26, y};
+        gc.fillPolygon(xs, ys, 4);
+        gc.strokePolygon(xs, ys, 4);
         } else {
-            gc.fillOval(x-NR, y-NR, NR*2, NR*2);
-            gc.strokeOval(x-NR, y-NR, NR*2, NR*2);
+            gc.fillOval(x - NR, y - NR, NR * 2, NR * 2);
+            gc.strokeOval(x - NR, y - NR, NR * 2, NR * 2);
         }
 
-        String name = el.getName().length() > 14
-            ? el.getName().substring(0, 13) + "…" : el.getName();
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 11));
-        gc.fillText(name, x - name.length() * 2.8, y + 3);
+        String name = shortName(el.getName());
 
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Sans", FontWeight.BOLD, 10));
+
+        if (el instanceof Passage && name.contains(" ")) {
+            String[] parts = name.split(" ", 2);
+            gc.fillText(parts[0], x - parts[0].length() * 2.8, y - 3);
+            gc.fillText(parts[1], x - parts[1].length() * 2.8, y + 10);
+        } else {
+            gc.fillText(name, x - name.length() * 2.8, y + 3);
+        }
+        
         String occ = el.getCurrentOccupancy() + "/" + el.getMaxCapacity();
+
         gc.setFill(Color.web("#eeeeee"));
         gc.setFont(Font.font("Sans", 8));
-        gc.fillText(occ, x - occ.length() * 2,
-            y + (el instanceof Exit ? 22 : NR + 10));
+        gc.fillText(
+            occ,
+            x - occ.length() * 2,
+            y + (el instanceof Exit ? 22 : NR + 10)
+        );
+    }
+
+    private String shortName(String name) {
+        return switch (name) {
+            case "Jonction Centrale" -> "J. Centrale";
+            case "Jonction Nord" -> "J. Nord";
+            case "Jonction Sud" -> "J. Sud";
+            case "Palier Esc. 1" -> "P. Esc. 1";
+            case "Palier Esc. 2" -> "P. Esc. 2";
+            default -> name.length() > 14 ? name.substring(0, 13) + "…" : name;
+        };
     }
 
     private void drawAgent(GraphicsContext gc, double x, double y, Agent a) {
         Color c = a.getState() == AgentState.PANICKED
-            ? Color.web("#f44336") : Color.web("#1565c0");
-        gc.setStroke(c); gc.setFill(c); gc.setLineWidth(1.5);
-        gc.fillOval(x-3, y-12, 7, 7);
-        gc.strokeLine(x, y-5, x, y+5);
-        gc.strokeLine(x-4, y-1, x+4, y-1);
-        gc.strokeLine(x, y+5, x-3, y+11);
-        gc.strokeLine(x, y+5, x+3, y+11);
+            ? Color.web("#f44336")
+            : Color.web("#1565c0");
+
+        gc.setStroke(c);
+        gc.setFill(c);
+        gc.setLineWidth(1.5);
+
+        gc.fillOval(x - 3, y - 12, 7, 7);
+        gc.strokeLine(x, y - 5, x, y + 5);
+        gc.strokeLine(x - 4, y - 1, x + 4, y - 1);
+        gc.strokeLine(x, y + 5, x - 3, y + 11);
+        gc.strokeLine(x, y + 5, x + 3, y + 11);
     }
 
     private javafx.geometry.Point2D agentPos(Agent a) {
+        if (a.getCurrentLocation() == null) return null;
+
         javafx.geometry.Point2D base = pos.get(a.getCurrentLocation().getName());
         if (base == null) return null;
+
         BuildingElement next = a.getNextInPath();
+
         if (next != null && a.getProgress() > 0) {
             javafx.geometry.Point2D np = pos.get(next.getName());
+
             if (np != null) {
                 double t = a.getProgress();
+
                 return new javafx.geometry.Point2D(
-                    base.getX() + (np.getX()-base.getX())*t,
-                    base.getY() + (np.getY()-base.getY())*t);
+                    base.getX() + (np.getX() - base.getX()) * t,
+                    base.getY() + (np.getY() - base.getY()) * t
+                );
             }
         }
+
         int h = Math.abs(a.getId().hashCode());
-        return new javafx.geometry.Point2D(base.getX()+(h%18)-9, base.getY()+((h/18)%14)-7);
+
+        return new javafx.geometry.Point2D(
+            base.getX() + (h % 18) - 9,
+            base.getY() + ((h / 18) % 14) - 7
+        );
     }
 
     private Color nodeColor(BuildingElement el) {
         if (el.isBlocked()) return Color.web("#424242");
         if (el instanceof Exit) return Color.web("#0d47a1");
         if (el instanceof Passage) return Color.web("#283593");
+
         double r = el.getMaxCapacity() > 0
-            ? (double) el.getCurrentOccupancy() / el.getMaxCapacity() : 0;
+            ? (double) el.getCurrentOccupancy() / el.getMaxCapacity()
+            : 0;
+
         if (r < 0.4) return Color.web("#1b5e20");
         if (r < 0.8) return Color.web("#e65100");
         return Color.web("#b71c1c");
@@ -269,14 +333,25 @@ public class ObserverView {
     }
 
     private void initPositions() {
-        put("Réserve", 120, 85);      put("Bureau 1", 120, 180);
-        put("Bureau 2", 120, 275);    put("Bureau 3", 120, 370);
-        put("Escalier 1", 265, 85);   put("Couloir Nord", 380, 175);
-        put("LT Serveurs", 540, 105); put("Escalier 2", 445, 255);
-        put("Hall Central", 540, 350);
-        put("Sortie Ouest", 85, 450);    put("Amphithéâtre", 245, 450);
-        put("Couloir Sud", 430, 450);    put("Logement", 600, 450);
-        put("Sortie Est 1", 700, 230);   put("Sortie Est 2", 700, 350);
+        put("Réserve", 120, 85);
+        put("Bureau 1", 120, 180);
+        put("Bureau 2", 120, 275);
+        put("Bureau 3", 120, 370);
+
+        put("Palier Esc. 1", 265, 85);
+        put("Jonction Nord", 380, 175);
+        put("Palier Esc. 2", 445, 255);
+
+        put("LT Serveurs", 540, 105);
+        put("Jonction Centrale", 540, 350);
+
+        put("Sortie Ouest", 85, 450);
+        put("Amphithéâtre", 245, 450);
+        put("Jonction Sud", 430, 450);
+        put("Logement", 600, 450);
+
+        put("Sortie Est 1", 700, 230);
+        put("Sortie Est 2", 700, 350);
         put("Sortie Est 3", 700, 435);
     }
 
