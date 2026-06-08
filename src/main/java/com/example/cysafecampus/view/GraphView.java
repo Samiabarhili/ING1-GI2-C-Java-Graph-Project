@@ -9,7 +9,13 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.paint.Color;
+import javafx.scene.paint.CycleMethod;
+import javafx.scene.paint.LinearGradient;
+import javafx.scene.paint.Paint;
+import javafx.scene.paint.Stop;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
@@ -145,11 +151,11 @@ public class GraphView {
 
         // Legend
         HBox legend = new HBox(6,
-            legendDot(COL_GREEN,   "Vide"),
-            legendDot(COL_ORANGE,  "Dense"),
-            legendDot(COL_RED,     "Saturé"),
+            legendDot(COL_GREEN,   "Faible densité"),
+            legendDot(COL_ORANGE,  "Densité moyenne"),
+            legendDot(COL_RED,     "Forte densité"),
             legendDot(COL_EXIT,    "Sortie"),
-            legendDot(EDGE_COLOR,  "Arête / passage")
+            legendDot(EDGE_COLOR,  "Arête sélectionnable")
         );
         legend.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
@@ -197,15 +203,18 @@ public class GraphView {
         // Draw the selected agent route above the network edges.
         drawSelectedAgentRoute(gc);
 
-       // Nodes — rooms, exits and junctions
+        // Nodes — only real rooms and exits are drawn as large nodes.
+        // Passages and virtual junctions are drawn as compact density markers below.
         for (BuildingElement el : graph.getElements()) {
-            if (el.getName().contains("↔")) continue;
+            if (el.getName().contains("↔") || el instanceof Passage) continue;
 
             Point2D pos = getOrCreate(el);
             if (pos == null) continue;
 
             drawNode(gc, el, pos);
         }
+
+        drawPassageAndJunctionMarkers(gc);
 
         // Selection details are refreshed after density and movement changes.
         refreshSelectionLabel();
@@ -221,8 +230,10 @@ public class GraphView {
             tickLabel.setText("Tick: " + controller.getTickCount());
     }
     /**
-     * Draws every model connection instead of relying on fixed default lines.
-     * This keeps the visual graph consistent after adding, moving or deleting nodes.
+     * Draws every visible graph edge with a color based on passage density.
+     * The density is computed from agents currently inside the passage and
+     * agents visually moving toward or away from that passage.
+     *
      * @param gc canvas graphics context
      */
     private void drawGraphEdges(GraphicsContext gc) {
@@ -230,69 +241,250 @@ public class GraphView {
 
         for (Passage passage : graph.getPassages()) {
             Point2D passagePosition = positionForElement(passage);
-            if (passagePosition == null) continue;
+            if (passagePosition == null) {
+                continue;
+            }
 
             for (Door door : passage.getConnectedDoors()) {
                 Room room = door.getRoom();
-                if (room == null || room.getName().contains("↔")) continue;
+                if (room == null || room.getName().contains("↔")) {
+                    continue;
+                }
 
                 Point2D roomPosition = positionForElement(room);
-                drawEdge(gc, roomPosition, passagePosition, passage);
+                drawDensityEdge(gc, roomPosition, passagePosition, passage);
             }
         }
 
         for (BuildingElement element : graph.getElements()) {
-            if (!(element instanceof Room) || !element.getName().contains("↔")) continue;
+            if (!(element instanceof Room) || !element.getName().contains("↔")) {
+                continue;
+            }
 
             Room junction = (Room) element;
-            List<Passage> connectedPassages = new ArrayList<>();
-            for (Door door : junction.getDoors()) {
-                if (door.getPassage() != null) connectedPassages.add(door.getPassage());
-            }
+            List<Passage> connectedPassages = connectedPassagesOf(junction);
 
             if (connectedPassages.size() == 2) {
                 Passage first = connectedPassages.get(0);
                 Passage second = connectedPassages.get(1);
                 Point2D firstPosition = positionForElement(first);
                 Point2D secondPosition = positionForElement(second);
-                drawEdge(gc, firstPosition, secondPosition, first);
+                Point2D junctionPosition = positionForElement(junction);
+
+                drawDensityEdge(gc, firstPosition, junctionPosition, first);
+                drawDensityEdge(gc, junctionPosition, secondPosition, second);
             }
         }
     }
 
     /**
-     * Draws a single edge using a density-dependent color.
+     * Draws all passage and virtual junction markers after edges have been drawn.
+     * Passages are rendered as compact points so the graph keeps a clear
+     * node/edge distinction: rooms are large nodes, passages and junctions are
+     * small density markers.
+     *
      * @param gc canvas graphics context
-     * @param from start position
-     * @param to end position
-     * @param passage passage used to compute edge density
      */
-    private void drawEdge(GraphicsContext gc, Point2D from, Point2D to, Passage passage) {
-        if (from == null || to == null || passage == null) return;
+    private void drawPassageAndJunctionMarkers(GraphicsContext gc) {
+        for (Passage passage : controller.getGraph().getPassages()) {
+            drawCompactElementMarker(gc, passage, false);
+        }
 
-        gc.setStroke(edgeColor(passage));
-        gc.setLineWidth(passage.equals(selectedElement) ? 8.0 : 5.0);
-        gc.strokeLine(from.getX(), from.getY(), to.getX(), to.getY());
-
-        String capacity = passage.getCurrentOccupancy() + "/" + passage.getMaxCapacity();
-        double midX = (from.getX() + to.getX()) / 2.0;
-        double midY = (from.getY() + to.getY()) / 2.0;
-        gc.setFill(TEXT_LIGHT);
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
-        gc.fillText(capacity, midX + 6, midY - 6);
+        for (BuildingElement element : controller.getGraph().getElements()) {
+            if (element instanceof Room && element.getName().contains("↔")) {
+                drawCompactElementMarker(gc, element, true);
+            }
+        }
     }
 
     /**
-     * Returns the visual color of an edge according to passage occupancy.
-     * @param passage passage represented by the edge
+     * Draws a visual edge using a traffic-light density gradient.
+     * Green means low density, orange means medium density and red means the
+     * passage is full or over capacity.
+     *
+     * @param gc canvas graphics context
+     * @param from start position
+     * @param to end position
+     * @param passage passage whose density is displayed by the edge
+     */
+    private void drawDensityEdge(GraphicsContext gc, Point2D from, Point2D to, Passage passage) {
+        if (from == null || to == null || passage == null) {
+            return;
+        }
+
+        double density = densityRatioWithMovingAgents(passage);
+        Color edgeColor = densityColorFromRatio(density);
+
+        gc.setStroke(edgeColor);
+        gc.setLineWidth(passage.equals(selectedElement) ? 10.0 : 7.0);
+        gc.strokeLine(from.getX(), from.getY(), to.getX(), to.getY());
+
+        // A thin bright overlay keeps very dark green/orange edges visible on the dark theme.
+        gc.setStroke(Color.color(1, 1, 1, 0.18));
+        gc.setLineWidth(passage.equals(selectedElement) ? 3.0 : 1.5);
+        gc.strokeLine(from.getX(), from.getY(), to.getX(), to.getY());
+
+        drawEdgeCapacityLabel(gc, from, to, passage);
+    }
+
+    /**
+     * Draws the occupancy/capacity label in the middle of a visual edge.
+     *
+     * @param gc canvas graphics context
+     * @param from start position
+     * @param to end position
+     * @param passage passage whose capacity label is shown
+     */
+    private void drawEdgeCapacityLabel(GraphicsContext gc, Point2D from, Point2D to, Passage passage) {
+        int visualOccupancy = visualOccupancyOf(passage);
+        String capacity = visualOccupancy + "/" + passage.getMaxCapacity();
+        double midX = (from.getX() + to.getX()) / 2.0;
+        double midY = (from.getY() + to.getY()) / 2.0;
+
+        gc.setFill(Color.color(0, 0, 0, 0.55));
+        gc.fillRoundRect(midX + 3, midY - 19, capacity.length() * 7.0 + 8, 16, 6, 6);
+
+        gc.setFill(TEXT_LIGHT);
+        gc.setFont(Font.font("Sans", FontWeight.BOLD, 10));
+        gc.fillText(capacity, midX + 7, midY - 7);
+    }
+
+    /**
+     * Draws a compact point for a passage or virtual junction.
+     *
+     * @param gc canvas graphics context
+     * @param element graph element to display
+     * @param virtualJunction true when the element is a generated passage-to-passage junction
+     */
+    private void drawCompactElementMarker(GraphicsContext gc, BuildingElement element, boolean virtualJunction) {
+        Point2D position = positionForElement(element);
+        if (position == null) {
+            return;
+        }
+
+        double radius = virtualJunction ? 7.0 : 10.0;
+        if (element.equals(selectedElement)) {
+            radius += 4.0;
+        }
+
+        double density = densityRatioWithMovingAgents(element);
+        gc.setFill(densityColorFromRatio(density));
+        gc.setStroke(element.equals(selectedElement) ? Color.WHITE : TEXT_LIGHT);
+        gc.setLineWidth(element.equals(selectedElement) ? 3.0 : 1.5);
+        gc.fillOval(position.getX() - radius, position.getY() - radius, radius * 2.0, radius * 2.0);
+        gc.strokeOval(position.getX() - radius, position.getY() - radius, radius * 2.0, radius * 2.0);
+
+        String occupancy = visualOccupancyOf(element) + "/" + element.getMaxCapacity();
+        gc.setFill(TEXT_LIGHT);
+        gc.setFont(Font.font("Sans", FontWeight.BOLD, 8));
+        gc.fillText(occupancy, position.getX() + radius + 3.0, position.getY() - radius - 2.0);
+
+        if (!virtualJunction) {
+            String name = element.getName();
+            if (name.length() > 12) {
+                name = name.substring(0, 11) + "…";
+            }
+            gc.setFill(TEXT_DIM);
+            gc.setFont(Font.font("Sans", 8));
+            gc.fillText(name, position.getX() - name.length() * 2.2, position.getY() + radius + 11.0);
+        }
+    }
+
+    /**
+     * Returns the passages connected to a virtual junction room.
+     *
+     * @param junction virtual junction room
+     * @return connected passages
+     */
+    private List<Passage> connectedPassagesOf(Room junction) {
+        List<Passage> connectedPassages = new ArrayList<>();
+        for (Door door : junction.getDoors()) {
+            if (door.getPassage() != null) {
+                connectedPassages.add(door.getPassage());
+            }
+        }
+        return connectedPassages;
+    }
+
+    /**
+     * Returns a color from green to orange to red according to density.
+     *
+     * @param ratio density ratio between 0 and 1
      * @return density color
      */
-    private Color edgeColor(Passage passage) {
-        if (passage.getMaxCapacity() <= 0) return EDGE_COLOR;
-        double ratio = (double) passage.getCurrentOccupancy() / passage.getMaxCapacity();
-        if (ratio >= 1.0) return EDGE_FULL;
-        if (ratio >= 0.6) return EDGE_DENSE;
-        return EDGE_COLOR;
+    private Color densityColorFromRatio(double ratio) {
+        double clampedRatio = Math.max(0.0, Math.min(1.0, ratio));
+        if (clampedRatio >= 1.0) {
+            return COL_RED;
+        }
+        if (clampedRatio >= 0.6) {
+            double t = (clampedRatio - 0.6) / 0.4;
+            return COL_ORANGE.interpolate(COL_RED, t);
+        }
+        return COL_GREEN.interpolate(COL_ORANGE, clampedRatio / 0.6);
+    }
+
+    /**
+     * Computes density using both stored occupancy and agents currently moving
+     * visually on the element. This makes edge colors update as soon as agents
+     * start entering an edge, instead of only after they arrive at the passage node.
+     *
+     * @param element graph element to inspect
+     * @return density ratio clamped between 0 and 1
+     */
+    private double densityRatioWithMovingAgents(BuildingElement element) {
+        if (element == null || element.getMaxCapacity() <= 0) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(1.0, (double) visualOccupancyOf(element) / element.getMaxCapacity()));
+    }
+
+    /**
+     * Computes the visual occupancy of an element, including agents in transit.
+     *
+     * @param element graph element to inspect
+     * @return number of agents visually occupying or moving through the element
+     */
+    private int visualOccupancyOf(BuildingElement element) {
+        if (element == null || controller == null || controller.getGraph() == null) {
+            return 0;
+        }
+
+        int count = 0;
+        for (Agent agent : controller.getGraph().getAgents()) {
+            BuildingElement current = agent.getCurrentLocation();
+            BuildingElement next = agent.getNextInPath();
+
+            if (element.equals(current)) {
+                count++;
+                continue;
+            }
+
+            if (agent.getProgress() > 0.0 && element.equals(next)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Returns a continuous color from green to orange to red according to density.
+     *
+     * @param element element whose density must be rendered
+     * @return density color
+     */
+    private Color densityColor(BuildingElement element) {
+        return densityColorFromRatio(densityRatioWithMovingAgents(element));
+    }
+
+    /**
+     * Computes an element density safely, clamped between 0 and 1.
+     *
+     * @param element element to inspect
+     * @return occupancy divided by maximum capacity
+     */
+    private double densityRatio(BuildingElement element) {
+        return densityRatioWithMovingAgents(element);
     }
 
     /**
@@ -398,13 +590,9 @@ public class GraphView {
 
     private Color nodeColor(BuildingElement el) {
         if (el.isBlocked()) return COL_BLOCKED;
-        if (el.getMaxCapacity() == 0) return COL_GREEN;
-        double r = (double) el.getCurrentOccupancy() / el.getMaxCapacity();
-        if (r >= 1.0) return COL_RED;
-        if (r >= 0.6) return COL_ORANGE;
-        if (el instanceof Exit) return COL_EXIT;
-        if (el instanceof Passage) return COL_PASSAGE;
-        return COL_GREEN;
+        if (el instanceof Exit && densityRatio(el) < 0.6) return COL_EXIT;
+        if (el instanceof Passage && densityRatio(el) < 0.6) return COL_PASSAGE;
+        return densityColor(el);
     }
 
     // ── Status helpers ────────────────────────────────────
@@ -520,25 +708,37 @@ public class GraphView {
     // ── Selection handling ────────────────────────────────
 
     /**
-     * Handles canvas clicks to select either an agent or a graph element.
-     * Agents are tested first because they are drawn over nodes.
+     * Handles canvas primary clicks to select an agent, junction, edge or node.
+     * The handler is registered on mouse pressed instead of mouse clicked so the
+     * context menu can be hidden immediately when the user clicks elsewhere.
      */
     private void setupSelectionHandler() {
-        canvas.setOnMouseClicked(event -> {
+        canvas.addEventHandler(MouseEvent.MOUSE_PRESSED, event -> {
             if (graphContextMenu != null && graphContextMenu.isShowing()) {
                 graphContextMenu.hide();
+            }
+
+            if (event.getButton() != MouseButton.PRIMARY) {
+                return;
             }
 
             Point2D click = new Point2D(event.getX(), event.getY());
 
             selectedAgent = findAgentAt(click);
-            selectedElement = selectedAgent == null ? findPassageEdgeAt(click) : null;
+            selectedElement = selectedAgent == null ? findJunctionAt(click) : null;
+            if (selectedAgent == null && selectedElement == null) {
+                selectedElement = findPassageMarkerAt(click);
+            }
+            if (selectedAgent == null && selectedElement == null) {
+                selectedElement = findPassageEdgeAt(click);
+            }
             if (selectedAgent == null && selectedElement == null) {
                 selectedElement = findElementAt(click);
             }
 
             refreshSelectionLabel();
             drawGraphFromModel();
+            event.consume();
         });
     }
 
@@ -552,6 +752,41 @@ public class GraphView {
             Point2D position = agentPos(agent);
             if (position != null && position.distance(click) <= 16) {
                 return agent;
+            }
+        }
+        return null;
+    }
+
+
+    /**
+     * Finds a virtual junction marker close to the clicked position.
+     *
+     * @param click clicked canvas position
+     * @return selected junction room or null
+     */
+    private BuildingElement findJunctionAt(Point2D click) {
+        for (BuildingElement element : controller.getGraph().getElements()) {
+            if (!(element instanceof Room) || !element.getName().contains("↔")) continue;
+
+            Point2D position = positionForElement(element);
+            if (position != null && position.distance(click) <= 14.0) {
+                return element;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Finds a compact passage marker close to the clicked position.
+     *
+     * @param click clicked canvas position
+     * @return selected passage or null
+     */
+    private Passage findPassageMarkerAt(Point2D click) {
+        for (Passage passage : controller.getGraph().getPassages()) {
+            Point2D position = positionForElement(passage);
+            if (position != null && position.distance(click) <= 18.0) {
+                return passage;
             }
         }
         return null;
@@ -574,7 +809,7 @@ public class GraphView {
                 if (room == null || room.getName().contains("↔")) continue;
 
                 Point2D roomPosition = positionForElement(room);
-                if (distanceToSegment(click, roomPosition, passagePosition) <= 10.0) {
+                if (distanceToSegment(click, roomPosition, passagePosition) <= 18.0) {
                     return passage;
                 }
             }
@@ -594,7 +829,7 @@ public class GraphView {
                 Passage second = connectedPassages.get(1);
                 Point2D firstPosition = positionForElement(first);
                 Point2D secondPosition = positionForElement(second);
-                if (distanceToSegment(click, firstPosition, secondPosition) <= 10.0) {
+                if (distanceToSegment(click, firstPosition, secondPosition) <= 18.0) {
                     return first;
                 }
             }
@@ -662,15 +897,18 @@ public class GraphView {
         }
 
         if (selectedElement != null) {
+            int visualOccupancy = visualOccupancyOf(selectedElement);
             double density = selectedElement.getMaxCapacity() > 0
-                ? (double) selectedElement.getCurrentOccupancy() / selectedElement.getMaxCapacity()
+                ? (double) visualOccupancy / selectedElement.getMaxCapacity()
                 : 0.0;
-            String elementType = selectedElement instanceof Passage ? "Arête" : "Nœud";
+            String elementType = selectedElement instanceof Passage
+                ? "Arête"
+                : selectedElement.getName().contains("↔") ? "Jonction" : "Nœud";
             selectionLabel.setText(
                 elementType + ": " + selectedElement.getName()
-                + " | agents présents=" + selectedElement.getCurrentOccupancy()
+                + " | agents visibles=" + visualOccupancy
                 + " | capacité maximale=" + selectedElement.getMaxCapacity()
-                + " | occupation=" + selectedElement.getCurrentOccupancy() + "/" + selectedElement.getMaxCapacity()
+                + " | occupation=" + visualOccupancy + "/" + selectedElement.getMaxCapacity()
                 + " | agents passés=" + selectedElement.getTotalAgentsPassed()
                 + " | vitesse moyenne=" + String.format("%.2f", selectedElement.getAverageSpeed())
                 + " | densité=" + String.format("%.0f%%", density * 100));
