@@ -886,30 +886,30 @@ public class GraphController {
 
         // ── Doors / graph connections ──────────────────────
         // North part
-        connectRoomToPassage(storage, staircase1);
-        connectPassageToPassage(staircase1, northJunction);
+        connectRoomToPassage(storage, staircase1, 8);
+        connectPassageToPassage(staircase1, northJunction, 8);
 
-        connectRoomToPassage(office1, northJunction);
-        connectRoomToPassage(office2, northJunction);
+        connectRoomToPassage(office1, northJunction, 6);
+        connectRoomToPassage(office2, northJunction, 6);
 
-        connectPassageToPassage(northJunction, staircase2);
-        connectPassageToPassage(staircase2, mainHall);
+        connectPassageToPassage(northJunction, staircase2, 10);
+        connectPassageToPassage(staircase2, mainHall, 10);
 
         // Central part
-        connectRoomToPassage(serverRoom, mainHall);
-        connectRoomToPassage(office3, mainHall);
+        connectRoomToPassage(serverRoom, mainHall, 6);
+        connectRoomToPassage(office3, mainHall, 6);
 
-        connectRoomToPassage(exitEast1, mainHall);
-        connectRoomToPassage(exitEast2, mainHall);
-        connectRoomToPassage(exitEast3, mainHall);
+        connectRoomToPassage(exitEast1, mainHall, 20);
+        connectRoomToPassage(exitEast2, mainHall, 20);
+        connectRoomToPassage(exitEast3, mainHall, 20);
 
         // South part
-        connectRoomToPassage(amphitheater, southJunction);
-        connectRoomToPassage(housing, southJunction);
-        connectPassageToPassage(southJunction, mainHall);
+        connectRoomToPassage(amphitheater, southJunction, 12);
+        connectRoomToPassage(housing, southJunction, 6);
+        connectPassageToPassage(southJunction, mainHall, 12);
 
         // West emergency exit
-        connectRoomToPassage(exitWest, southJunction);
+        connectRoomToPassage(exitWest, southJunction, 20);
         // ── Sensors ────────────────────────────────────────
         PresenceSensor ps1 = new PresenceSensor("PS-Amphi", amphitheater);
         PresenceSensor ps2 = new PresenceSensor("PS-B1", office1);
@@ -947,36 +947,61 @@ public class GraphController {
     }
 
     /**
-     * Helper: creates a bidirectional door between a room-like element and a passage.
+     * Helper: creates one corridor segment between a room-like element and a
+     * passage. The capacity belongs to the corridor segment, not to exits.
+     *
+     * @param roomLike room, exit or virtual junction connected to the passage
+     * @param passage passage connected to the room-like element
+     * @param corridorCapacity maximum number of agents inside this corridor segment
      */
-    private void connectRoomToPassage(BuildingElement roomLike, Passage passage) {
-        // Exit now extends Room, so this handles both Room and Exit correctly
+    private void connectRoomToPassage(BuildingElement roomLike, Passage passage, int corridorCapacity) {
         if (roomLike instanceof Room) {
-            Door door = new Door((Room) roomLike, passage);
+            Door door = new Door((Room) roomLike, passage, corridorCapacity);
             ((Room) roomLike).addDoor(door);
             passage.addDoor(door);
         }
     }
 
     /**
-     * Helper: connects two passages via a shared virtual door (corridor junction).
-     * Stored as a Room-less door to indicate passage adjacency.
+     * Backwards-compatible helper using the default corridor capacity.
+     *
+     * @param roomLike room, exit or virtual junction connected to the passage
+     * @param passage passage connected to the room-like element
      */
-    private void connectPassageToPassage(Passage a, Passage b) {
-        // Passages connect to each other when they share a physical junction.
-        // We model this by adding each passage to the other's neighbor list.
-        // PathFinder.getNeighbors() already handles Passage→Passage adjacency
-        // if we add a junction Room, OR we extend PathFinder to check passage lists.
-        // Simplest: add a tiny junction room as intermediary.
+    private void connectRoomToPassage(BuildingElement roomLike, Passage passage) {
+        connectRoomToPassage(roomLike, passage, 10);
+    }
+
+    /**
+     * Helper: connects two passage nodes through a small virtual junction. This
+     * creates two distinct corridor segments: one segment ends at the junction
+     * and another segment starts from it.
+     *
+     * @param a first passage node
+     * @param b second passage node
+     * @param corridorCapacity capacity used for both corridor segments
+     */
+    private void connectPassageToPassage(Passage a, Passage b, int corridorCapacity) {
         String junctionName = a.getName() + "↔" + b.getName();
-        Room junction = new Room(junctionName, 999, 1);
+        Room junction = new Room(junctionName, 20, 1);
         junction.setStatus(BlockStatus.ACCESSIBLE);
         graph.addElement(junction);
-        Door d1 = new Door(junction, a);
-        Door d2 = new Door(junction, b);
-        junction.addDoor(d1);
-        junction.addDoor(d2);
-        a.addDoor(d1);
-        b.addDoor(d2);
+
+        Door firstSegment = new Door(junction, a, corridorCapacity);
+        Door secondSegment = new Door(junction, b, corridorCapacity);
+        junction.addDoor(firstSegment);
+        junction.addDoor(secondSegment);
+        a.addDoor(firstSegment);
+        b.addDoor(secondSegment);
+    }
+
+    /**
+     * Backwards-compatible helper using the default corridor capacity.
+     *
+     * @param a first passage node
+     * @param b second passage node
+     */
+    private void connectPassageToPassage(Passage a, Passage b) {
+        connectPassageToPassage(a, b, 10);
     }
 }
