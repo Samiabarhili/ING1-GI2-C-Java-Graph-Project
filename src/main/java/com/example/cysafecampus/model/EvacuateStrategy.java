@@ -40,58 +40,26 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
 
         BuildingElement next = path.get(idx + 1);
 
-        // Blocked → recompute
+        // Strong congestion rule: if a forced relocation placed too many agents
+        // in the current node, agents must wait before entering an available edge
+        // until the node returns to a normal occupancy level.
+        BuildingElement current = agent.getCurrentLocation();
+        if (current != null && current.isOvercrowded() && next instanceof Passage) {
+            agent.setWaitCycles(2);
+            return;
+        }
+
+        // Blocked node → recompute path
         if (next.isBlocked()) {
             agent.setPath(new ArrayList<>());
             agent.setProgress(0.0);
             return;
         }
 
-        if (next instanceof Passage && next.isFull() && agent.getBehavior() == Behavior.POLITE) {
-            List<BuildingElement> newPath = PathFinder.calculateFastestPath(
-                agent.getCurrentLocation(),
-                agent.getDestination(),
-                agent.getMaxSpeed()
-            );
-
-            if (!newPath.isEmpty()) {
-                agent.setPath(newPath);
-            }
-
-            agent.setWaitCycles(1);
-            return;
-        }
-
-        // Move progressively from a room/exit to a passage node.
-        // Without this block, agents teleport directly from rooms to junctions.
-        if (next instanceof Passage && !(agent.getCurrentLocation() instanceof Passage)) {
-            Passage passage = (Passage) next;
-
-            if (passage.getCurrentOccupancy() >= passage.getMaxCapacity()
-                    && agent.getBehavior() != Behavior.RUDE) {
-                agent.setWaitCycles(2);
-                return;
-            }
-
-            double step = agent.getMaxSpeed() / 10.0;
-            agent.setProgress(agent.getProgress() + step);
-
-            if (agent.getProgress() >= 1.0) {
-                agent.getCurrentLocation().agentLeaves();
-                passage.agentEnters(agent.getMaxSpeed());
-
-                agent.setCurrentLocation(passage);
-                agent.setPathIndex(idx + 1);
-                agent.setProgress(0.0);
-            }
-
-            return;
-        }
-
+        // If the next element is a passage, apply congestion rules before entering it.
         if (next instanceof Passage) {
             Passage passage = (Passage) next;
 
-            // Bottleneck — only agents with low density tolerance wait
             int maxLanes = Math.max(1, passage.getLanes());
             double density = passage.getMaxCapacity() > 0
                 ? (double) passage.getCurrentOccupancy() / passage.getMaxCapacity()
@@ -116,52 +84,46 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
                 agent.setWaitCycles(2);
                 return;
             }
-
-            // First tick entering passage
-            if (agent.getProgress() == 0.0) {
-                agent.getCurrentLocation().agentLeaves();
-                passage.agentEnters(agent.getMaxSpeed());
-                agent.setCurrentLocation(passage);
-                agent.setPathIndex(idx + 1);
-                idx = idx + 1; // update local idx
-            }
-
-            // Advance progress
-            double dist = Math.max(0.1, passage.getDistance());
-            double step = (agent.getMaxSpeed() * passage.getSpeedFactor()) / dist;
-            agent.setProgress(agent.getProgress() + step);
-
-            if (agent.getProgress() >= 1.0) {
-                agent.setProgress(0.0);
-                // Move to next node after the passage
-                int nextIdx = idx + 1;
-                if (nextIdx < path.size()) {
-                    BuildingElement dest = path.get(nextIdx);
-                    passage.agentLeaves();
-                    dest.agentEnters(agent.getMaxSpeed());
-                    agent.setCurrentLocation(dest);
-                    agent.setPathIndex(nextIdx);
-                } else {
-                    // Passage is the last element — already arrived
-                    passage.agentLeaves();
-                    agent.setCurrentLocation(passage);
-                }
-            }
-
-        } else {
-            // Move progressively between two visible graph nodes instead of teleporting.
-            double step = agent.getMaxSpeed() / 10.0;
-            agent.setProgress(agent.getProgress() + step);
-
-            if (agent.getProgress() >= 1.0) {
-                agent.getCurrentLocation().agentLeaves();
-                next.agentEnters(agent.getMaxSpeed());
-
-                agent.setCurrentLocation(next);
-                agent.setPathIndex(idx + 1);
-                agent.setProgress(0.0);
-            }
         }
+
+        // Move progressively between the current element and the next element.
+        // The current location and path index are updated only when progress reaches 1.
+        double distance = 10.0;
+
+        if (next instanceof Passage) {
+            Passage passage = (Passage) next;
+            distance = Math.max(0.1, passage.getDistance());
+        }
+
+        double speedFactor = next instanceof Passage
+            ? ((Passage) next).getSpeedFactor()
+            : 1.0;
+
+        double step = Math.max(0.05, (agent.getMaxSpeed() * speedFactor) / distance);
+        double newProgress = agent.getProgress() + step;
+
+        if (newProgress >= 1.0) {
+            BuildingElement previous = agent.getCurrentLocation();
+
+            if (previous != null) {
+                previous.agentLeaves();
+            }
+
+            next.agentEnters(agent.getMaxSpeed());
+
+            agent.setCurrentLocation(next);
+            agent.setPathIndex(idx + 1);
+            agent.setProgress(0.0);
+
+            if (next.equals(agent.getDestination())) {
+                onArrival(agent);
+            }
+
+            return;
+        }
+
+        agent.setProgress(newProgress);
+        return;
     }
 
     protected void onArrival(Agent agent) {
