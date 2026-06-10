@@ -1,6 +1,6 @@
 # Java Project - GI2 C - Theme 3
 
-> Realized by Abdou Malak, Amaini Maellys, Barhili Samia and Benameur Bayane Lila
+> Realized by Abdou Malak, Amaini Maellys, Barhili Samia and Benameur Bayane
 
 ## Objective
 JavaFX application simulating agent movement in a graph representing the CY Tech campus. Allows visualization and simulation of an emergency evacuation with multiple roles.
