@@ -123,6 +123,9 @@ public class AdminView {
     // UI labels
     private Label fireStatusLbl;
     private VBox  infoPanelBox;
+    private Button playPauseBtn;
+    private TextArea logArea;
+    private boolean useFastestPath = false;
     private final Map<String, Button> toolBtns = new HashMap<>();
     private final Map<String, Button> floorBtns = new HashMap<>();
 
@@ -146,6 +149,20 @@ public class AdminView {
         stage.setTitle("CY SafeCampus — Administration");
         stage.setScene(scene);
         stage.show();
+
+        // Journal capteurs comme dans le ZIP
+        controller.setSensorEventCallback(event -> javafx.application.Platform.runLater(() -> {
+            String icon = event.getSeverity() >= 4 ? "🔥"
+                        : event.getSeverity() >= 3 ? "⚠"
+                        : "ℹ";
+
+            String location = event.getLocation() != null
+                ? event.getLocation().getName()
+                : "?";
+
+            log(icon + " [" + event.getType() + "] " + location
+                + " — sévérité " + event.getSeverity());
+        }));
 
         startRenderLoop();
     }
@@ -367,16 +384,19 @@ public class AdminView {
     // ── Sidebar ───────────────────────────────────────────
 
     private VBox buildSidebar() {
-        VBox sb = new VBox();
-        sb.setPrefWidth(260);
-        sb.setStyle("-fx-background-color:white;-fx-border-color:#e8eaed;-fx-border-width:0 0 0 1;");
+        VBox panel = new VBox(10);
+        panel.setPadding(new Insets(12));
+        panel.setBackground(new Background(new BackgroundFill(
+            Color.web("#f8f9fa"), CornerRadii.EMPTY, Insets.EMPTY
+        )));
 
-        sb.getChildren().add(sSection("Ajouter"));
+        // ── Ajouter ───────────────────────────────────────
+        panel.getChildren().add(sSection("Ajouter"));
 
         GridPane addBtns = new GridPane();
         addBtns.setHgap(6);
         addBtns.setVgap(6);
-        addBtns.setPadding(new Insets(0, 10, 8, 10));
+        addBtns.setPadding(new Insets(0, 0, 8, 0));
         addBtns.setMaxWidth(Double.MAX_VALUE);
 
         ColumnConstraints c1 = new ColumnConstraints();
@@ -399,6 +419,7 @@ public class AdminView {
         for (Button b : List.of(bRoom, bHall, bStair, bExit, bEdge, bDel)) {
             b.setMaxWidth(Double.MAX_VALUE);
             b.setMinHeight(30);
+            b.setWrapText(true);
             GridPane.setHgrow(b, Priority.ALWAYS);
         }
 
@@ -409,46 +430,170 @@ public class AdminView {
         addBtns.add(bEdge,  0, 2);
         addBtns.add(bDel,   1, 2);
 
-        sb.getChildren().add(addBtns);
+        panel.getChildren().add(addBtns);
 
-        // ── Simulation ────────────────────────────────────
-        sb.getChildren().add(sSection("Simulation"));
-        Button fireBtn  = sBtn("Déclencher feu",    "#e24b4a");
+        // ── Simulation comme dans le ZIP ─────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Simulation"));
+
+        playPauseBtn = sBtn("▶ Play", "#2e7d32");
+        Button stepBtn = sBtn("⏭ Step", "#546e7a");
+
+        playPauseBtn.setMaxWidth(Double.MAX_VALUE);
+        stepBtn.setMaxWidth(Double.MAX_VALUE);
+
+        playPauseBtn.setOnAction(e -> {
+            if (controller.isRunning()) {
+                controller.pause();
+                playPauseBtn.setText("▶ Play");
+                log("Simulation en pause");
+            } else {
+                controller.play();
+                playPauseBtn.setText("⏸ Pause");
+                log("Simulation lancée");
+            }
+        });
+
+        stepBtn.setOnAction(e -> {
+            controller.step();
+            log("Simulation avancée d'un pas");
+        });
+
+        HBox simBtns = new HBox(8, playPauseBtn, stepBtn);
+
+        Label speedLbl = new Label("Vitesse :");
+        speedLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+
+        Slider speedSlider = new Slider(50, 2000, 500);
+        speedSlider.setMaxWidth(Double.MAX_VALUE);
+        speedSlider.valueProperty().addListener((o, ov, nv) ->
+            controller.setSpeed((int)(2050 - nv.doubleValue()))
+        );
+
+        ToggleButton pathToggle = new ToggleButton("Chemin : plus court");
+        pathToggle.setMaxWidth(Double.MAX_VALUE);
+        pathToggle.setStyle(defaultBtnStyle());
+        pathToggle.setOnAction(e -> {
+            useFastestPath = pathToggle.isSelected();
+            pathToggle.setText(useFastestPath ? "Chemin : plus rapide" : "Chemin : plus court");
+            log(useFastestPath ? "Calcul par chemin le plus rapide" : "Calcul par chemin le plus court");
+        });
+
+        panel.getChildren().addAll(simBtns, speedLbl, speedSlider, pathToggle);
+
+        // ── Alertes ──────────────────────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Alertes"));
+
+        Button alarmBtn = sBtn("Déclencher alarme", "#c62828");
+        Button fireBtn  = sBtn("Placer feu sur graphe", "#e24b4a");
         Button resetBtn = sBtn("Réinitialiser feu", "#546e7a");
-        fireBtn.setOnAction(e -> setTool("fire"));
-        resetBtn.setOnAction(e -> resetFire());
+
+        alarmBtn.setMaxWidth(Double.MAX_VALUE);
+        fireBtn.setMaxWidth(Double.MAX_VALUE);
+        resetBtn.setMaxWidth(Double.MAX_VALUE);
+
+        alarmBtn.setOnAction(e -> {
+            controller.triggerFireAlert();
+            fireStatusLbl.setText("ALERTE INCENDIE");
+            fireStatusLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#dc2626;-fx-font-weight:bold;");
+            log("ALERTE INCENDIE déclenchée");
+        });
+
+        fireBtn.setOnAction(e -> {
+            setTool("fire");
+            showInfo("Cliquez sur un élément du graphe pour placer le feu");
+            log("Mode placement du feu activé");
+        });
+
+        resetBtn.setOnAction(e -> {
+            resetFire();
+            log("Feu réinitialisé");
+        });
+
         fireStatusLbl = new Label("Aucun feu détecté");
         fireStatusLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
-        VBox simBox = new VBox(4, new HBox(4, fireBtn, resetBtn), fireStatusLbl);
-        simBox.setPadding(new Insets(0, 10, 8, 10));
-        sb.getChildren().add(simBox);
 
-        // ── Étage ─────────────────────────────────────────
-        sb.getChildren().add(sSection("Étage affiché"));
+        panel.getChildren().addAll(alarmBtn, fireBtn, resetBtn, fireStatusLbl);
+
+        // ── Agents comme dans le ZIP ─────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Agents"));
+
+        Button addAgentBtn  = sBtn("Ajouter agent", "#1565c0");
+        Button editAgentBtn = sBtn("Modifier agent", "#0277bd");
+        Button rmAgentBtn   = sBtn("Supprimer agent", "#546e7a");
+        Button rndAgentsBtn = sBtn("Agents aléatoires", "#6a1b9a");
+
+        for (Button b : List.of(addAgentBtn, editAgentBtn, rmAgentBtn, rndAgentsBtn)) {
+            b.setMaxWidth(Double.MAX_VALUE);
+        }
+
+        addAgentBtn.setOnAction(e -> handleAddAgent());
+        editAgentBtn.setOnAction(e -> handleEditAgent());
+        rmAgentBtn.setOnAction(e -> handleRemoveAgent());
+        rndAgentsBtn.setOnAction(e -> handleRandomAgents());
+
+        panel.getChildren().addAll(addAgentBtn, editAgentBtn, rmAgentBtn, rndAgentsBtn);
+
+        // ── Étage affiché ────────────────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Étage affiché"));
+
         Button fAll = floorBtn("fl-all", "Tous", -1);
         Button f0   = floorBtn("fl-0",   "RDC",   0);
         Button f1   = floorBtn("fl-1",   "1er",   1);
         Button f2   = floorBtn("fl-2",   "2e",    2);
-        HBox floorBtnRow = new HBox(4, fAll, f0, f1, f2);
-        floorBtnRow.setPadding(new Insets(0, 10, 8, 10));
-        sb.getChildren().add(floorBtnRow);
-        fAll.fire(); // activate "Tous" by default
 
-        // ── Info panel ────────────────────────────────────
-        sb.getChildren().add(sSection("Propriétés"));
+        HBox floorBtnRow = new HBox(4, fAll, f0, f1, f2);
+        panel.getChildren().add(floorBtnRow);
+        fAll.fire();
+
+        // ── Propriétés ───────────────────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Propriétés"));
+
         infoPanelBox = new VBox(4);
-        infoPanelBox.setPadding(new Insets(4, 10, 8, 10));
+        infoPanelBox.setPadding(new Insets(4, 0, 8, 0));
+
         Label hint = new Label("Cliquez sur un élément");
         hint.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
         infoPanelBox.getChildren().add(hint);
-        sb.getChildren().add(infoPanelBox);
 
-        // ── Légende ───────────────────────────────────────
-        Region sp = new Region(); VBox.setVgrow(sp, Priority.ALWAYS);
-        sb.getChildren().add(sp);
-        sb.getChildren().add(buildLegend());
+        panel.getChildren().add(infoPanelBox);
 
-        return sb;
+        // ── Journal capteurs ─────────────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Journal capteurs"));
+
+        logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setPrefRowCount(6);
+        logArea.setWrapText(true);
+        logArea.setStyle("-fx-font-size:10px;-fx-font-family:monospace;");
+
+        panel.getChildren().add(logArea);
+
+        // ── Légende ──────────────────────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(buildLegend());
+
+        // ── ScrollPane : le curseur pour monter / descendre ───
+        ScrollPane scroll = new ScrollPane(panel);
+        scroll.setFitToWidth(true);
+        scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scroll.setPannable(true);
+        scroll.setStyle("-fx-background:#f8f9fa;-fx-background-color:#f8f9fa;");
+        scroll.setPrefWidth(260);
+
+        VBox wrapper = new VBox(scroll);
+        wrapper.setPrefWidth(260);
+        wrapper.setMinWidth(260);
+        wrapper.setStyle("-fx-background-color:#f8f9fa;-fx-border-color:#e8eaed;-fx-border-width:0 0 0 1;");
+        VBox.setVgrow(scroll, Priority.ALWAYS);
+
+        return wrapper;
     }
 
     private Label sSection(String text) {
@@ -1234,6 +1379,212 @@ public class AdminView {
         l.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
         l.setWrapText(true);
         infoPanelBox.getChildren().add(l);
+    }
+
+
+    private void handleAddAgent() {
+        TextField nameF = new TextField();
+        TextField speedF = new TextField("1.0");
+        TextField tolF = new TextField("0.7");
+
+        ComboBox<String> locB = nodeCombo();
+
+        ComboBox<Behavior> behB = new ComboBox<>();
+        behB.getItems().addAll(Behavior.values());
+        behB.getSelectionModel().selectFirst();
+
+        dialog("Ajouter un agent",
+            grid("Nom :", nameF,
+                "Position :", locB,
+                "Vitesse :", speedF,
+                "Tolérance :", tolF,
+                "Comportement :", behB),
+            () -> {
+                try {
+                    String name = nameF.getText().trim();
+
+                    if (name.isEmpty()) {
+                        showErr("Le nom de l'agent est obligatoire");
+                        return;
+                    }
+
+                    controller.addPersonAgent(
+                        name,
+                        locB.getValue(),
+                        Double.parseDouble(speedF.getText().trim()),
+                        behB.getValue(),
+                        Double.parseDouble(tolF.getText().trim())
+                    );
+
+                    log("Agent ajouté : " + name);
+                } catch (Exception ex) {
+                    showErr("Valeurs invalides");
+                }
+            }
+        );
+    }
+
+    private void handleEditAgent() {
+        ComboBox<String> agB = agentCombo();
+
+        TextField nameF = new TextField();
+        TextField speedF = new TextField();
+        TextField tolF = new TextField();
+
+        ComboBox<String> locB = nodeCombo();
+
+        ComboBox<Behavior> behB = new ComboBox<>();
+        behB.getItems().addAll(Behavior.values());
+        behB.getSelectionModel().selectFirst();
+
+        agB.setOnAction(e -> {
+            controller.getGraph().getAgents().stream()
+                .filter(a -> a.getName().equals(agB.getValue()))
+                .findFirst()
+                .ifPresent(a -> {
+                    nameF.setText(a.getName());
+                    speedF.setText(String.valueOf(a.getMaxSpeed()));
+                    tolF.setText(String.valueOf(a.getDensityTolerance()));
+                    locB.setValue(a.getCurrentLocation().getName());
+                    behB.setValue(a.getBehavior());
+                });
+        });
+
+        if (!agB.getItems().isEmpty()) {
+            agB.getSelectionModel().selectFirst();
+            agB.getOnAction().handle(null);
+        }
+
+        dialog("Modifier un agent",
+            grid("Agent :", agB,
+                "Nouveau nom :", nameF,
+                "Position :", locB,
+                "Vitesse :", speedF,
+                "Tolérance :", tolF,
+                "Comportement :", behB),
+            () -> {
+                try {
+                    controller.updateAgent(
+                        agB.getValue(),
+                        nameF.getText().trim(),
+                        locB.getValue(),
+                        Double.parseDouble(speedF.getText().trim()),
+                        behB.getValue(),
+                        Double.parseDouble(tolF.getText().trim())
+                    );
+
+                    log("Agent modifié : " + nameF.getText().trim());
+                } catch (Exception ex) {
+                    showErr("Valeurs invalides");
+                }
+            }
+        );
+    }
+
+    private void handleRemoveAgent() {
+        ComboBox<String> agB = agentCombo();
+
+        dialog("Supprimer un agent",
+            grid("Agent :", agB),
+            () -> {
+                if (agB.getValue() != null) {
+                    controller.removeAgent(agB.getValue());
+                    log("Agent supprimé : " + agB.getValue());
+                }
+            }
+        );
+    }
+
+    private void handleRandomAgents() {
+        TextField countF = new TextField("10");
+        TextField minSF = new TextField("0.5");
+        TextField maxSF = new TextField("1.5");
+        TextField minTF = new TextField("0.3");
+        TextField maxTF = new TextField("1.0");
+
+        dialog("Agents aléatoires",
+            grid("Nombre :", countF,
+                "Vitesse min :", minSF,
+                "Vitesse max :", maxSF,
+                "Tolérance min :", minTF,
+                "Tolérance max :", maxTF),
+            () -> {
+                try {
+                    int n = Integer.parseInt(countF.getText().trim());
+
+                    controller.addRandomAgents(
+                        n,
+                        Double.parseDouble(minSF.getText().trim()),
+                        Double.parseDouble(maxSF.getText().trim()),
+                        Double.parseDouble(minTF.getText().trim()),
+                        Double.parseDouble(maxTF.getText().trim())
+                    );
+
+                    log(n + " agents aléatoires ajoutés");
+                } catch (Exception ex) {
+                    showErr("Valeurs invalides");
+                }
+            }
+        );
+    }
+
+    private ComboBox<String> nodeCombo() {
+        ComboBox<String> b = new ComboBox<>();
+
+        controller.getGraph().getElements().stream()
+            .filter(el -> !el.getName().contains("↔"))
+            .forEach(el -> b.getItems().add(el.getName()));
+
+        b.getSelectionModel().selectFirst();
+        return b;
+    }
+
+    private ComboBox<String> agentCombo() {
+        ComboBox<String> b = new ComboBox<>();
+
+        controller.getGraph().getAgents()
+            .forEach(a -> b.getItems().add(a.getName()));
+
+        b.getSelectionModel().selectFirst();
+        return b;
+    }
+
+    private void dialog(String title, GridPane content, Runnable onOk) {
+        Dialog<ButtonType> d = new Dialog<>();
+        d.setTitle(title);
+        d.getDialogPane().setContent(content);
+        d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        d.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.OK) {
+                onOk.run();
+            }
+        });
+    }
+
+    private GridPane grid(Object... pairs) {
+        GridPane g = new GridPane();
+        g.setHgap(10);
+        g.setVgap(8);
+        g.setPadding(new Insets(10));
+
+        for (int i = 0; i < pairs.length; i += 2) {
+            g.add(new Label(pairs[i].toString()), 0, i / 2);
+            g.add((javafx.scene.Node) pairs[i + 1], 1, i / 2);
+        }
+
+        return g;
+    }
+
+    private void showErr(String msg) {
+        new Alert(Alert.AlertType.ERROR, msg, ButtonType.OK).showAndWait();
+    }
+
+    private void log(String msg) {
+        if (logArea != null) {
+            logArea.appendText(msg + "\n");
+            logArea.setScrollTop(Double.MAX_VALUE);
+        }
     }
 
     // ── Save / Load ───────────────────────────────────────
