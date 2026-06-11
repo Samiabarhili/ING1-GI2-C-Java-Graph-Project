@@ -21,6 +21,10 @@ import javafx.util.Duration;
 import javafx.geometry.VPos;
 import javafx.scene.text.TextAlignment;
 import javafx.scene.text.Text;
+import javafx.scene.shape.Circle;
+import javafx.scene.shape.Polygon;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.Shape;
 
 import java.io.File;
 import java.util.*;
@@ -188,7 +192,7 @@ public class AdminView {
         addE("r1b","d1b"); addE("d1b","h1a");
         addE("h1a","d1c"); addE("d1c","r1c");
         addE("h1a","s1a"); addE("h1a","px1"); addE("px1","ex1");
-        
+
         // ── Cross-floor ───────────────────────────────────
         addE("s0a","s1a");
     }
@@ -367,25 +371,50 @@ public class AdminView {
         sb.setPrefWidth(260);
         sb.setStyle("-fx-background-color:white;-fx-border-color:#e8eaed;-fx-border-width:0 0 0 1;");
 
-        // ── Ajouter ───────────────────────────────────────
         sb.getChildren().add(sSection("Ajouter"));
-        HBox addBtns = new HBox(4);
-        addBtns.setPadding(new Insets(0, 10, 8, 10));
-        addBtns.setMaxWidth(Double.MAX_VALUE); 
 
-        Button bRoom  = toolBtn("btn-addRoom",  "☐ Salle",    "addRoom");
-        Button bHall  = toolBtn("btn-addHall",  "○ Hall",     "addHall");
-        Button bStair = toolBtn("btn-addStair", "△ Escalier", "addStair");
-        Button bExit  = toolBtn("btn-addExit",  "◇ Sortie",   "addExit");
-        Button bEdge  = toolBtn("btn-addEdge",  "— Lien",     "addEdge");
-        Button bDel   = toolBtn("btn-delete",   "✕ Suppr.",   "delete");
-        addBtns.getChildren().addAll(bRoom, bHall, bStair, bExit, bEdge, bDel);
+        GridPane addBtns = new GridPane();
+        addBtns.setHgap(6);
+        addBtns.setVgap(6);
+        addBtns.setPadding(new Insets(0, 10, 8, 10));
+        addBtns.setMaxWidth(Double.MAX_VALUE);
+
+        ColumnConstraints c1 = new ColumnConstraints();
+        c1.setPercentWidth(50);
+        c1.setHgrow(Priority.ALWAYS);
+
+        ColumnConstraints c2 = new ColumnConstraints();
+        c2.setPercentWidth(50);
+        c2.setHgrow(Priority.ALWAYS);
+
+        addBtns.getColumnConstraints().addAll(c1, c2);
+
+        Button bRoom  = toolBtn("btn-addRoom",  "Ajouter salle",     "addRoom");
+        Button bHall  = toolBtn("btn-addHall",  "Ajouter hall",      "addHall");
+        Button bStair = toolBtn("btn-addStair", "Ajouter escalier",  "addStair");
+        Button bExit  = toolBtn("btn-addExit",  "Ajouter sortie",    "addExit");
+        Button bEdge  = toolBtn("btn-addEdge",  "Créer lien",        "addEdge");
+        Button bDel   = toolBtn("btn-delete",   "Supprimer",         "delete");
+
+        for (Button b : List.of(bRoom, bHall, bStair, bExit, bEdge, bDel)) {
+            b.setMaxWidth(Double.MAX_VALUE);
+            b.setMinHeight(30);
+            GridPane.setHgrow(b, Priority.ALWAYS);
+        }
+
+        addBtns.add(bRoom,  0, 0);
+        addBtns.add(bHall,  1, 0);
+        addBtns.add(bStair, 0, 1);
+        addBtns.add(bExit,  1, 1);
+        addBtns.add(bEdge,  0, 2);
+        addBtns.add(bDel,   1, 2);
+
         sb.getChildren().add(addBtns);
 
         // ── Simulation ────────────────────────────────────
         sb.getChildren().add(sSection("Simulation"));
-        Button fireBtn  = sBtn("🔥 Déclencher feu", "#e24b4a");
-        Button resetBtn = sBtn("↺ Reset",            "#546e7a");
+        Button fireBtn  = sBtn("Déclencher feu",    "#e24b4a");
+        Button resetBtn = sBtn("Réinitialiser feu", "#546e7a");
         fireBtn.setOnAction(e -> setTool("fire"));
         resetBtn.setOnAction(e -> resetFire());
         fireStatusLbl = new Label("Aucun feu détecté");
@@ -446,35 +475,114 @@ public class AdminView {
     }
 
     private VBox buildLegend() {
-        VBox box = new VBox(3);
+        VBox box = new VBox(5);
         box.setPadding(new Insets(8, 10, 10, 10));
         box.setStyle("-fx-border-color:#e8eaed;-fx-border-width:1 0 0 0;");
+
         Label title = new Label("Légende");
         title.setStyle("-fx-font-size:10px;-fx-font-weight:bold;-fx-text-fill:#94a3b8;");
         box.getChildren().add(title);
+
         box.getChildren().addAll(
-            legRow("□ bleu",   "Salle RDC"),
-            legRow("□ vert",   "Salle 1er"),
-            legRow("□ orange", "Salle 2e"),
-            legRow("■ gris",   "Porte (débit p/s affiché)"),
-            legRow("● violet", "Hall (capacité affichée)"),
-            legRow("▲ jaune",  "Escalier (débit p/s)"),
-            legRow("◆ vert",   "Sortie évacuation"),
-            legRow("■ rouge",  "Feu / propagation")
+            legRow(roomIcon(0),  "Salle RDC"),
+            legRow(roomIcon(1),  "Salle 1er étage"),
+            legRow(roomIcon(2),  "Salle 2e étage"),
+            legRow(doorIcon(),   "Porte"),
+            legRow(hallIcon(),   "Hall"),
+            legRow(stairIcon(),  "Escalier"),
+            legRow(exitIcon(),   "Sortie"),
+            legRow(fireIcon(),   "Feu / propagation")
         );
+
         Label note = new Label("Arêtes = liens simples sans étiquette");
         note.setStyle("-fx-font-size:9px;-fx-text-fill:#94a3b8;-fx-padding:4 0 0 0;");
         box.getChildren().add(note);
+
         return box;
     }
 
-    private HBox legRow(String shape, String desc) {
-        Label s = new Label(shape);
-        s.setMinWidth(60);
-        s.setStyle("-fx-font-size:10px;-fx-text-fill:#475569;");
+
+    private HBox legRow(javafx.scene.Node shape, String desc) {
+        StackPane iconBox = new StackPane(shape);
+        iconBox.setMinWidth(26);
+        iconBox.setPrefWidth(26);
+        iconBox.setAlignment(Pos.CENTER);
+
         Label d = new Label(desc);
         d.setStyle("-fx-font-size:10px;-fx-text-fill:#64748b;");
-        return new HBox(6, s, d);
+
+        HBox row = new HBox(8, iconBox, d);
+        row.setAlignment(Pos.CENTER_LEFT);
+
+        return row;
+    }
+
+
+    private Shape roomIcon(int floor) {
+        int f = Math.min(floor, FLOOR_FILL.length - 1);
+
+        Rectangle r = new Rectangle(18, 11);
+        r.setArcWidth(4);
+        r.setArcHeight(4);
+        r.setFill(FLOOR_FILL[f][0]);
+        r.setStroke(FLOOR_FILL[f][1]);
+        r.setStrokeWidth(1.4);
+
+        return r;
+    }
+
+    private Shape doorIcon() {
+        Rectangle r = new Rectangle(13, 13);
+        r.setFill(Color.web("#f8fafc"));
+        r.setStroke(Color.web("#6b7280"));
+        r.setStrokeWidth(1.4);
+
+        return r;
+    }
+
+    private Shape hallIcon() {
+        Circle c = new Circle(8);
+        c.setFill(Color.web("#ede9fe"));
+        c.setStroke(Color.web("#7c3aed"));
+        c.setStrokeWidth(1.4);
+
+        return c;
+    }
+
+    private Shape stairIcon() {
+        Polygon p = new Polygon(
+            9.0, 0.0,
+            18.0, 16.0,
+            0.0, 16.0
+        );
+        p.setFill(Color.web("#fef9c3"));
+        p.setStroke(Color.web("#ca8a04"));
+        p.setStrokeWidth(1.4);
+
+        return p;
+    }
+
+    private Shape exitIcon() {
+        Polygon p = new Polygon(
+            10.0, 0.0,
+            20.0, 10.0,
+            10.0, 20.0,
+            0.0, 10.0
+        );
+        p.setFill(Color.web("#dcfce7"));
+        p.setStroke(Color.web("#16a34a"));
+        p.setStrokeWidth(1.4);
+
+        return p;
+    }
+
+    private Shape fireIcon() {
+        Rectangle r = new Rectangle(14, 14);
+        r.setFill(Color.web("#ff3333"));
+        r.setStroke(Color.web("#aa0000"));
+        r.setStrokeWidth(1.4);
+
+        return r;
     }
 
     private void setZoom(double newZoom) {
