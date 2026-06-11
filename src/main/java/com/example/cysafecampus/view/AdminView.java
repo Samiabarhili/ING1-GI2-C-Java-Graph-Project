@@ -138,9 +138,23 @@ public class AdminView {
     private Button playPauseBtn;
     private TextArea logArea;
     private boolean useFastestPath = false;
+
+    private static class VisualAgent {
+        String agentId;
+        String fromId;
+        String toId;
+        String previousId;
+        double t;
+        double x;
+        double y;
+    }
+
+    private final Map<String, VisualAgent> visualAgents = new HashMap<>();
+    private final Random visualAgentRandom = new Random();
+    private long lastAgentFrameNs = 0L;
+
     private final Map<String, Button> toolBtns = new HashMap<>();
     private final Map<String, Button> floorBtns = new HashMap<>();
-
     // ── Constructor ───────────────────────────────────────
 
     public AdminView(Stage stage, GraphController controller) {
@@ -468,6 +482,15 @@ public class AdminView {
 
         stepBtn.setOnAction(e -> {
             controller.step();
+
+            for (Agent a : controller.getGraph().getAgents()) {
+                VisualAgent va = visualAgents.get(a.getId());
+
+                if (va != null) {
+                    advanceVisualAgent(va, a, 0.35);
+                }
+            }
+
             log("Simulation avancée d'un pas");
         });
 
@@ -882,6 +905,9 @@ public class AdminView {
             drawNode(gc, n);
         }
 
+        // Agents visibles sur le graphe
+        drawVisualAgents(gc);
+
         gc.restore();
         updateSelectionStatsPanel();
     }
@@ -926,6 +952,390 @@ public class AdminView {
         }
 
         return prefix + "." + name;
+    }
+
+    private void drawVisualAgents(GraphicsContext gc) {
+        updateVisualAgents();
+
+        for (Agent a : controller.getGraph().getAgents()) {
+            if (a.isEvacuated()) continue;
+
+            VisualAgent va = visualAgents.get(a.getId());
+            if (va == null) continue;
+
+            VNode current = byId(va.fromId);
+
+            if (currentFloor != -1 && current != null && current.floor != currentFloor) {
+                continue;
+            }
+
+            drawAgentIcon(gc, va.x, va.y, a);
+        }
+    }
+
+    private void updateVisualAgents() {
+        long now = System.nanoTime();
+
+        if (lastAgentFrameNs == 0L) {
+            lastAgentFrameNs = now;
+        }
+
+        double dt = (now - lastAgentFrameNs) / 1_000_000_000.0;
+        lastAgentFrameNs = now;
+
+        Set<String> aliveIds = new HashSet<>();
+
+        for (Agent a : controller.getGraph().getAgents()) {
+            if (a.isEvacuated()) continue;
+
+            aliveIds.add(a.getId());
+
+            visualAgents.computeIfAbsent(a.getId(), id -> createVisualAgent(a));
+        }
+
+        visualAgents.keySet().removeIf(id -> !aliveIds.contains(id));
+
+        if (!controller.isRunning()) {
+            return;
+        }
+
+        for (Agent a : controller.getGraph().getAgents()) {
+            if (a.isEvacuated()) continue;
+
+            VisualAgent va = visualAgents.get(a.getId());
+
+            if (va != null) {
+                advanceVisualAgent(va, a, dt);
+            }
+        }
+    }
+
+    private VisualAgent createVisualAgent(Agent a) {
+        VNode start = startNodeForAgent(a);
+
+        VisualAgent va = new VisualAgent();
+        va.agentId = a.getId();
+
+        if (start == null) {
+            va.x = 60;
+            va.y = 60;
+            return va;
+        }
+
+        va.fromId = start.id;
+        va.toId = chooseNextNode(start.id, null, false);
+        va.previousId = null;
+        va.t = 0.0;
+        va.x = start.x + offsetX(a);
+        va.y = start.y + offsetY(a);
+
+        return va;
+    }
+
+    private void advanceVisualAgent(VisualAgent va, Agent a, double dt) {
+        VNode from = byId(va.fromId);
+        VNode to = byId(va.toId);
+
+        if (from == null) {
+            VNode restart = startNodeForAgent(a);
+
+            if (restart == null) return;
+
+            va.fromId = restart.id;
+            va.toId = chooseNextNode(restart.id, null, false);
+            va.t = 0.0;
+            va.x = restart.x;
+            va.y = restart.y;
+            return;
+        }
+
+        if (to == null || from.id.equals(to.id)) {
+            va.x = from.x + offsetX(a);
+            va.y = from.y + offsetY(a);
+            va.toId = chooseNextNode(from.id, va.previousId, isEvacuationMode(a));
+            va.t = 0.0;
+            return;
+        }
+
+        double dx = to.x - from.x;
+        double dy = to.y - from.y;
+        double dist = Math.max(1.0, Math.hypot(dx, dy));
+
+        // Vitesse visuelle en pixels/seconde
+        double visualSpeed = Math.max(0.4, a.getMaxSpeed()) * 45.0;
+
+        va.t += (visualSpeed * dt) / dist;
+
+        if (va.t >= 1.0) {
+            va.previousId = va.fromId;
+            va.fromId = va.toId;
+
+            VNode arrived = byId(va.fromId);
+
+            if (arrived != null && isEvacuationMode(a) && arrived.type == NType.EXIT) {
+                va.toId = va.fromId;
+                va.t = 0.0;
+                va.x = arrived.x + offsetX(a);
+                va.y = arrived.y + offsetY(a);
+                return;
+            }
+
+            va.toId = chooseNextNode(va.fromId, va.previousId, isEvacuationMode(a));
+            va.t = 0.0;
+
+            from = byId(va.fromId);
+            to = byId(va.toId);
+        }
+
+        if (from != null && to != null) {
+            va.x = from.x + (to.x - from.x) * va.t + offsetX(a);
+            va.y = from.y + (to.y - from.y) * va.t + offsetY(a);
+        }
+    }
+
+    private boolean isEvacuationMode(Agent a) {
+        return fireNodeId != null
+            || !fireSpread.isEmpty()
+            || a.getState() == AgentState.PANICKED
+            || a.getPath() != null && !a.getPath().isEmpty();
+    }
+
+    private VNode startNodeForAgent(Agent a) {
+        BuildingElement loc = a.getCurrentLocation();
+
+        if (loc != null) {
+            VNode exact = visualNodeForModelLocation(loc.getName());
+
+            if (exact != null) {
+                return exact;
+            }
+        }
+
+        List<VNode> candidates = new ArrayList<>();
+
+        for (VNode n : nodes) {
+            if (n.type == NType.ROOM || n.type == NType.HALL) {
+                candidates.add(n);
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            candidates.addAll(nodes);
+        }
+
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        int index = Math.abs(a.getId().hashCode()) % candidates.size();
+
+        return candidates.get(index);
+    }
+
+    private VNode visualNodeForModelLocation(String modelName) {
+        if (modelName == null) return null;
+
+        String m = normalize(modelName);
+
+        for (VNode n : nodes) {
+            if (normalize(n.label).equals(m)) {
+                return n;
+            }
+        }
+
+        // Petites correspondances entre le modèle et ton graphe visuel
+        if (m.contains("bureau")) {
+            return firstNodeOfType(NType.ROOM, 0);
+        }
+
+        if (m.contains("salle")) {
+            return firstNodeOfType(NType.ROOM, 1);
+        }
+
+        if (m.contains("amphi")) {
+            return findNodeLabelContains("Amphi");
+        }
+
+        if (m.contains("lt")) {
+            return findNodeLabelContains("LT");
+        }
+
+        if (m.contains("jonction") || m.contains("hall") || m.contains("palier")) {
+            return firstNodeOfType(NType.HALL, -1);
+        }
+
+        if (m.contains("esc")) {
+            return firstNodeOfType(NType.STAIR, -1);
+        }
+
+        if (m.contains("sortie")) {
+            return firstNodeOfType(NType.EXIT, -1);
+        }
+
+        return null;
+    }
+
+    private String normalize(String s) {
+        return s.toLowerCase()
+            .replace("é", "e")
+            .replace("è", "e")
+            .replace("ê", "e")
+            .replace("à", "a")
+            .replace("â", "a")
+            .replace("î", "i")
+            .replace("ï", "i")
+            .replace("ô", "o")
+            .replace("ù", "u")
+            .replace("ç", "c")
+            .trim();
+    }
+
+    private VNode firstNodeOfType(NType type, int floor) {
+        for (VNode n : nodes) {
+            if (n.type == type && (floor < 0 || n.floor == floor)) {
+                return n;
+            }
+        }
+
+        return null;
+    }
+
+    private VNode findNodeLabelContains(String text) {
+        String needle = normalize(text);
+
+        for (VNode n : nodes) {
+            if (normalize(n.label).contains(needle)) {
+                return n;
+            }
+        }
+
+        return null;
+    }
+
+    private String chooseNextNode(String currentId, String previousId, boolean evacuationMode) {
+        List<String> neighbors = neighborIds(currentId);
+
+        if (neighbors.isEmpty()) {
+            return currentId;
+        }
+
+        if (evacuationMode) {
+            String best = neighbors.get(0);
+            double bestDist = Double.MAX_VALUE;
+
+            for (String id : neighbors) {
+                VNode n = byId(id);
+
+                if (n == null) continue;
+
+                double d = distanceToNearestExit(n);
+
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = id;
+                }
+            }
+
+            return best;
+        }
+
+        List<String> choices = new ArrayList<>();
+
+        for (String id : neighbors) {
+            if (previousId == null || !id.equals(previousId)) {
+                choices.add(id);
+            }
+        }
+
+        if (choices.isEmpty()) {
+            choices.addAll(neighbors);
+        }
+
+        return choices.get(visualAgentRandom.nextInt(choices.size()));
+    }
+
+    private List<String> neighborIds(String nodeId) {
+        List<String> out = new ArrayList<>();
+
+        for (VEdge e : edges) {
+            if (e.from.equals(nodeId)) {
+                out.add(e.to);
+            } else if (e.to.equals(nodeId)) {
+                out.add(e.from);
+            }
+        }
+
+        return out;
+    }
+
+    private double distanceToNearestExit(VNode n) {
+        double best = Double.MAX_VALUE;
+
+        for (VNode exit : nodes) {
+            if (exit.type == NType.EXIT && exit.floor == n.floor) {
+                best = Math.min(best, Math.hypot(exit.x - n.x, exit.y - n.y));
+            }
+        }
+
+        if (best < Double.MAX_VALUE) {
+            return best;
+        }
+
+        for (VNode exit : nodes) {
+            if (exit.type == NType.EXIT) {
+                best = Math.min(best, Math.hypot(exit.x - n.x, exit.y - n.y));
+            }
+        }
+
+        return best;
+    }
+
+    private double offsetX(Agent a) {
+        int h = Math.abs(a.getId().hashCode());
+        return (h % 15) - 7;
+    }
+
+    private double offsetY(Agent a) {
+        int h = Math.abs(a.getId().hashCode() / 17);
+        return (h % 15) - 7;
+    }
+
+    private void drawAgentIcon(GraphicsContext gc, double x, double y, Agent a) {
+        Color c = a.getState() == AgentState.PANICKED
+            ? Color.web("#ef4444")
+            : Color.web("#2563eb");
+
+        // Halo
+        gc.setFill(Color.web("#ffffffcc"));
+        gc.fillOval(x - 8, y - 16, 16, 24);
+
+        // Tête
+        gc.setFill(c);
+        gc.fillOval(x - 4, y - 14, 8, 8);
+
+        // Corps
+        gc.setStroke(c);
+        gc.setLineWidth(2);
+        gc.strokeLine(x, y - 6, x, y + 5);
+
+        // Bras
+        gc.strokeLine(x - 5, y - 1, x + 5, y - 1);
+
+        // Jambes
+        gc.strokeLine(x, y + 5, x - 4, y + 12);
+        gc.strokeLine(x, y + 5, x + 4, y + 12);
+
+        // Nom court au-dessus
+        gc.setFill(Color.web("#0f172a"));
+        gc.setFont(Font.font("Sans", FontWeight.BOLD, 8));
+
+        String name = a.getName();
+
+        if (name.length() > 8) {
+            name = name.substring(0, 7) + "…";
+        }
+
+        gc.fillText(name, x, y - 20);
     }
 
 
@@ -1324,6 +1734,8 @@ public class AdminView {
         fireNodeId = null; fireSpread.clear();
         updateFireStatus();
         controller.reset();
+        visualAgents.clear();
+        lastAgentFrameNs = 0L;
     }
 
     private void updateFireStatus() {
