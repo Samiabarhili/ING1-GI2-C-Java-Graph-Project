@@ -81,6 +81,13 @@ public class AdminView {
     private final Stage stage;
     private final GraphController controller;
     private Canvas canvas;
+    private double zoom = 1.0;
+
+    private static final double MIN_ZOOM = 0.5;
+    private static final double MAX_ZOOM = 2.5;
+    private static final double ZOOM_STEP = 0.1;
+
+    private Label zoomLbl;
     private Timeline renderLoop;
     private Timeline fireTimer;
 
@@ -202,20 +209,38 @@ public class AdminView {
     private HBox buildTopBar() {
         Button backBtn = sBtn("← Retour", "#546e7a");
         backBtn.setOnAction(e -> goBack());
+
         Label title = new Label("Administrateur");
         title.setFont(Font.font("Sans", FontWeight.BOLD, 13));
         title.setTextFill(Color.web("#1a237e"));
+
+        Button zoomOutBtn = sBtn("−", "#1565c0");
+        Button zoomResetBtn = sBtn("100%", "#1565c0");
+        Button zoomInBtn = sBtn("+", "#1565c0");
+
+        zoomLbl = new Label("100%");
+        zoomLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#334155;-fx-padding:0 6;");
+
+        zoomOutBtn.setOnAction(e -> setZoom(zoom - ZOOM_STEP));
+        zoomResetBtn.setOnAction(e -> setZoom(1.0));
+        zoomInBtn.setOnAction(e -> setZoom(zoom + ZOOM_STEP));
+
+        HBox zoomBox = new HBox(4, zoomOutBtn, zoomResetBtn, zoomInBtn, zoomLbl);
+        zoomBox.setAlignment(Pos.CENTER);
 
         Button saveBtn = sBtn("💾 Save", "#1565c0");
         Button loadBtn = sBtn("📂 Load", "#1565c0");
         saveBtn.setOnAction(e -> handleSave());
         loadBtn.setOnAction(e -> handleLoad());
 
-        Region sp = new Region(); HBox.setHgrow(sp, Priority.ALWAYS);
-        HBox bar = new HBox(10, backBtn, title, sp, saveBtn, loadBtn);
+        Region sp = new Region();
+        HBox.setHgrow(sp, Priority.ALWAYS);
+
+        HBox bar = new HBox(10, backBtn, title, sp, zoomBox, saveBtn, loadBtn);
         bar.setPadding(new Insets(7, 12, 7, 12));
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.setStyle("-fx-background-color:#f8f9fa;-fx-border-color:#e8eaed;-fx-border-width:0 0 1 0;");
+
         return bar;
     }
 
@@ -227,6 +252,16 @@ public class AdminView {
         canvas.setOnMouseDragged(this::onMouseDragged);
         canvas.setOnMouseReleased(this::onMouseReleased);
         canvas.setOnMouseClicked(this::onMouseClicked);
+        canvas.setOnScroll(e -> {
+        if (e.isControlDown()) {
+            if (e.getDeltaY() > 0) {
+                setZoom(zoom + ZOOM_STEP);
+            } else {
+                setZoom(zoom - ZOOM_STEP);
+            }
+            e.consume();
+        }
+    });
 
         StackPane canvasWrap = new StackPane(canvas);
         canvasWrap.setBackground(new Background(new BackgroundFill(
@@ -366,6 +401,23 @@ public class AdminView {
         return new HBox(6, s, d);
     }
 
+    private void setZoom(double newZoom) {
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+
+        if (zoomLbl != null) {
+            zoomLbl.setText(Math.round(zoom * 100) + "%");
+        }
+    }
+
+    private double toGraphX(double screenX) {
+        return screenX / zoom;
+    }
+
+    private double toGraphY(double screenY) {
+        return screenY / zoom;
+    }
+
+
     // ── Render loop ───────────────────────────────────────
 
     private void startRenderLoop() {
@@ -380,41 +432,65 @@ public class AdminView {
         double w = canvas.getWidth();
         double h = canvas.getHeight();
 
+        double graphW = w / zoom;
+        double graphH = h / zoom;
+
         GraphicsContext gc = canvas.getGraphicsContext2D();
         gc.clearRect(0, 0, w, h);
 
-        // light grid background
+        gc.save();
+        gc.scale(zoom, zoom);
+
+        // Fond quadrillé
         gc.setStroke(Color.web("#e2e8f0"));
         gc.setLineWidth(0.5);
-        for (double x = 0; x < w; x += 40) gc.strokeLine(x, 0, x, h);
-        for (double y = 0; y < h; y += 40) gc.strokeLine(0, y, w, y);
-            List<VNode> visible = visibleNodes();
-            Set<String> visIds  = new HashSet<>();
-            visible.forEach(n -> visIds.add(n.id));
 
-        // ── Floor separator label ─────────────────────────
+        for (double x = 0; x < graphW; x += 40) {
+            gc.strokeLine(x, 0, x, graphH);
+        }
+
+        for (double y = 0; y < graphH; y += 40) {
+            gc.strokeLine(0, y, graphW, y);
+        }
+
+        List<VNode> visible = visibleNodes();
+        Set<String> visIds = new HashSet<>();
+        visible.forEach(n -> visIds.add(n.id));
+
+        // Séparation des étages
         if (currentFloor == -1) {
-            gc.setStroke(Color.web("#cbd5e1")); gc.setLineWidth(1);
+            gc.setStroke(Color.web("#cbd5e1"));
+            gc.setLineWidth(1);
             gc.setLineDashes(6, 4);
-            gc.strokeLine(0, 330, w, 330);
+            gc.strokeLine(0, 330, graphW, 330);
             gc.setLineDashes(0);
+
             gc.setFill(Color.web("#94a3b8"));
             gc.setFont(Font.font("Sans", 10));
             gc.fillText("RDC", 8, 320);
             gc.fillText("1er étage", 8, 345);
         }
 
-        // ── Edges ─────────────────────────────────────────
-        gc.setStroke(Color.web("#94a3b8")); gc.setLineWidth(1.5);
+        // Liens
+        gc.setStroke(Color.web("#94a3b8"));
+        gc.setLineWidth(1.5);
+
         for (VEdge e : edges) {
-            VNode a = byId(e.from), b = byId(e.to);
+            VNode a = byId(e.from);
+            VNode b = byId(e.to);
+
             if (a == null || b == null) continue;
             if (!visIds.contains(a.id) || !visIds.contains(b.id)) continue;
+
             gc.strokeLine(a.x, a.y, b.x, b.y);
         }
 
-        // ── Nodes ─────────────────────────────────────────
-        for (VNode n : visible) drawNode(gc, n);
+        // Composants
+        for (VNode n : visible) {
+            drawNode(gc, n);
+        }
+
+        gc.restore();
     }
 
     private void drawNode(GraphicsContext gc, VNode n) {
@@ -529,29 +605,44 @@ public class AdminView {
 
     private void onMousePressed(javafx.scene.input.MouseEvent e) {
         if (!e.isPrimaryButtonDown()) return;
-        double mx = e.getX(), my = e.getY();
+
+        double mx = toGraphX(e.getX());
+        double my = toGraphY(e.getY());
+
         wasDragged = false;
+
         VNode hit = hitNode(mx, my);
+
         if (hit != null && tool == null) {
-            dragId = hit.id; dragOx = e.getX(); dragOy = e.getY();
+            dragId = hit.id;
+            dragOx = mx;
+            dragOy = my;
         }
     }
 
     private void onMouseDragged(javafx.scene.input.MouseEvent e) {
         if (dragId == null) return;
-        wasDragged = true;
-        VNode n = byId(dragId);
-        if (n != null) {
-            n.x += e.getX() - dragOx;
-            n.y += e.getY() - dragOy;
-            // clamp
-            double w = canvas.getWidth();
-            double h = canvas.getHeight();
 
-            n.x = Math.max(30, Math.min(w - 30, n.x));
-            n.y = Math.max(30, Math.min(h - 30, n.y));
+        wasDragged = true;
+
+        double mx = toGraphX(e.getX());
+        double my = toGraphY(e.getY());
+
+        VNode n = byId(dragId);
+
+        if (n != null) {
+            n.x += mx - dragOx;
+            n.y += my - dragOy;
+
+            double graphW = canvas.getWidth() / zoom;
+            double graphH = canvas.getHeight() / zoom;
+
+            n.x = Math.max(30, Math.min(graphW - 30, n.x));
+            n.y = Math.max(30, Math.min(graphH - 30, n.y));
         }
-        dragOx = e.getX(); dragOy = e.getY();
+
+        dragOx = mx;
+        dragOy = my;
     }
 
     private void onMouseReleased(javafx.scene.input.MouseEvent e) {
@@ -560,7 +651,9 @@ public class AdminView {
 
     private void onMouseClicked(javafx.scene.input.MouseEvent e) {
         if (wasDragged) { wasDragged = false; return; }
-        double mx = e.getX(), my = e.getY();
+        double mx = toGraphX(e.getX());
+        double my = toGraphY(e.getY());
+
         VNode hit = hitNode(mx, my);
 
         // ── Tool: fire ────────────────────────────────────
