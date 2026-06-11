@@ -18,6 +18,9 @@ import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
+import javafx.geometry.VPos;
+import javafx.scene.text.TextAlignment;
+import javafx.scene.text.Text;
 
 import java.io.File;
 import java.util.*;
@@ -159,8 +162,9 @@ public class AdminView {
         addN("d0a", NType.DOOR,  0, 190,  90, "Porte 1",    10,  2);
         addN("d0b", NType.DOOR,  0, 190, 210, "Porte 2",    10,  3);
         addN("d0c", NType.DOOR,  0, 370,  90, "Porte 3",    10,  2);
-        addN("s0a", NType.STAIR, 0, 280, 290, "Escalier A", 20,  4);
-        addN("ex0", NType.EXIT,  0, 500, 155, "Sortie RDC", 50,  5);
+        addN("s0a", NType.STAIR, 0, 280, 290, "Escalier A",       20, 4);
+        addN("px0", NType.DOOR,  0, 520, 155, "Porte Sortie RDC", 10, 5);
+        addN("ex0", NType.EXIT,  0, 590, 155, "Sortie RDC",       50, 5);
 
         // ── 1er étage ─────────────────────────────────────
         addN("h1a", NType.HALL,  1, 280, 450, "Hall 1er",   40,  2);
@@ -170,21 +174,21 @@ public class AdminView {
         addN("d1a", NType.DOOR,  1, 190, 400, "Porte 4",    10,  2);
         addN("d1b", NType.DOOR,  1, 190, 500, "Porte 5",    10,  2);
         addN("d1c", NType.DOOR,  1, 370, 450, "Porte 6",    10,  2);
-        addN("s1a", NType.STAIR, 1, 440, 290, "Escalier B", 20,  4);
-        addN("ex1", NType.EXIT,  1, 500, 450, "Sortie 1er", 50,  5);
-
+        addN("s1a", NType.STAIR, 1, 440, 290, "Escalier B",       20, 4);
+        addN("px1", NType.DOOR,  1, 520, 450, "Porte Sortie 1er", 10, 5);
+        addN("ex1", NType.EXIT,  1, 590, 450, "Sortie 1er",       50, 5);        
         // ── Edges RDC ─────────────────────────────────────
         addE("r0a","d0a"); addE("d0a","h0a");
         addE("r0b","d0b"); addE("d0b","h0a");
         addE("h0a","d0c"); addE("d0c","r0c");
-        addE("h0a","s0a"); addE("s0a","ex0");
+        addE("h0a","s0a"); addE("h0a","px0"); addE("px0","ex0");
 
         // ── Edges 1er ─────────────────────────────────────
         addE("r1a","d1a"); addE("d1a","h1a");
         addE("r1b","d1b"); addE("d1b","h1a");
         addE("h1a","d1c"); addE("d1c","r1c");
-        addE("h1a","s1a"); addE("s1a","ex1");
-
+        addE("h1a","s1a"); addE("h1a","px1"); addE("px1","ex1");
+        
         // ── Cross-floor ───────────────────────────────────
         addE("s0a","s1a");
     }
@@ -199,6 +203,78 @@ public class AdminView {
     private void addE(String from, String to) {
         edges.add(new VEdge("e" + (++nodeCounter), from, to));
     }
+
+
+    private boolean edgeExists(String a, String b) {
+        for (VEdge e : edges) {
+            if ((e.from.equals(a) && e.to.equals(b)) ||
+                (e.from.equals(b) && e.to.equals(a))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void addEIfMissing(String from, String to) {
+        if (from == null || to == null || from.equals(to)) return;
+
+        if (!edgeExists(from, to)) {
+            addE(from, to);
+        }
+    }
+
+    private VNode findDoorForExit(String exitId) {
+        for (VEdge e : edges) {
+            if (e.from.equals(exitId)) {
+                VNode n = byId(e.to);
+                if (n != null && n.type == NType.DOOR) {
+                    return n;
+                }
+            }
+
+            if (e.to.equals(exitId)) {
+                VNode n = byId(e.from);
+                if (n != null && n.type == NType.DOOR) {
+                    return n;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private VNode createDoorForExit(VNode exit) {
+        double doorX;
+
+        // Si la sortie est assez loin du bord gauche, on met la porte à gauche.
+        // Sinon, on la met à droite pour éviter qu'elle sorte du canvas.
+        if (exit.x >= 80) {
+            doorX = exit.x - 45;
+        } else {
+            doorX = exit.x + 45;
+        }
+
+        String did = newId("d");
+
+        VNode door = new VNode(
+            did,
+            NType.DOOR,
+            exit.floor,
+            doorX,
+            exit.y,
+            "Porte " + exit.label
+        );
+
+        door.rate = 2;
+        nodes.add(door);
+
+        // La sortie est forcément reliée à sa porte
+        addEIfMissing(did, exit.id);
+
+        return door;
+    }
+
+    
 
     private String newId(String prefix) {
         return prefix + (++nodeCounter);
@@ -493,6 +569,49 @@ public class AdminView {
         gc.restore();
     }
 
+    private String fitText(String value, Font font, double maxWidth) {
+        if (value == null) return "";
+
+        Text helper = new Text(value);
+        helper.setFont(font);
+
+        if (helper.getLayoutBounds().getWidth() <= maxWidth) {
+            return value;
+        }
+
+        String ellipsis = "…";
+
+        for (int len = value.length() - 1; len > 0; len--) {
+            String candidate = value.substring(0, len) + ellipsis;
+            helper.setText(candidate);
+
+            if (helper.getLayoutBounds().getWidth() <= maxWidth) {
+                return candidate;
+            }
+        }
+
+        return "";
+    }
+
+
+    private String compactName(String label, String wordToRemove, String prefix) {
+        if (label == null || label.isBlank()) {
+            return prefix + ".";
+        }
+
+        String name = label.trim();
+
+        // Enlève le mot "Sortie" ou "Escalier" au début, sans tenir compte des majuscules
+        name = name.replaceFirst("(?i)^" + wordToRemove + "\\s*", "").trim();
+
+        if (name.isEmpty()) {
+            return prefix + ".";
+        }
+
+        return prefix + "." + name;
+    }
+
+
     private void drawNode(GraphicsContext gc, VNode n) {
         boolean onFire  = n.id.equals(fireNodeId);
         boolean spread  = fireSpread.contains(n.id);
@@ -555,43 +674,80 @@ public class AdminView {
 
         // Labels
         Color txtColor = (onFire || spread) ? Color.WHITE
-                       : n.type == NType.HALL  ? Color.web("#3b0764")
-                       : n.type == NType.STAIR ? Color.web("#78350f")
-                       : n.type == NType.EXIT  ? Color.web("#14532d")
-                       : FLOOR_FILL[Math.min(n.floor, FLOOR_FILL.length-1)][1];
+                    : n.type == NType.HALL  ? Color.web("#3b0764")
+                    : n.type == NType.STAIR ? Color.web("#78350f")
+                    : n.type == NType.EXIT  ? Color.web("#14532d")
+                    : FLOOR_FILL[Math.min(n.floor, FLOOR_FILL.length - 1)][1];
 
-        gc.setFill(txtColor);
+        gc.setTextAlign(TextAlignment.CENTER);
+        gc.setTextBaseline(VPos.CENTER);
 
         if (n.type == NType.DOOR) {
-            // Show rate inside the square
+            // Débit centré dans la porte
+            gc.setFill(txtColor);
             gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
             String rateStr = String.format("%.0f", n.rate);
-            gc.fillText(rateStr, n.x - rateStr.length() * 2.5, n.y + 3);
+            gc.fillText(rateStr, n.x, n.y);
+
             gc.setFill(Color.web("#94a3b8"));
             gc.setFont(Font.font("Sans", 8));
-            gc.fillText("p/s", n.x - 5, n.y + 17);
+            gc.fillText("p/s", n.x, n.y + 17);
+
         } else {
-            // Name label
+            String shortName = n.label.length() > 13
+                ? n.label.substring(0, 12) + "…"
+                : n.label;
+
             gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
-            String short_ = n.label.length() > 11 ? n.label.substring(0, 10) + "…" : n.label;
-            gc.fillText(short_, n.x - short_.length() * 2.5, n.y + 4);
+            gc.setFill(txtColor);
 
-            // Capacity badge for ROOM / HALL
-            if (n.type == NType.ROOM || n.type == NType.HALL) {
-                gc.setFill(Color.web("#6b7280"));
-                gc.setFont(Font.font("Sans", 8));
-                gc.fillText("cap:" + n.cap,
-                    n.x + (n.type == NType.ROOM ? 32 : 22),
-                    n.y - (n.type == NType.ROOM ? 22 : 26));
-            }
-
-            // Rate badge for STAIR
             if (n.type == NType.STAIR) {
-                gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
-                String rs = String.format("%.0fp/s", n.rate);
-                gc.fillText(rs, n.x - rs.length() * 2.5, n.y + 4);
+                Font stairFont = Font.font("Sans", FontWeight.BOLD, 8);
+                String stairName = compactName(n.label, "Escalier", "E");
+                stairName = fitText(stairName, stairFont, 32);
+
+                gc.setFont(stairFont);
+                gc.setFill(txtColor);
+                gc.fillText(stairName, n.x, n.y + 8);
+
+                // Débit en dessous du triangle
+                gc.setFont(Font.font("Sans", 8));
+                gc.setFill(Color.web("#78350f"));
+                String rs = String.format("%.0f p/s", n.rate);
+                gc.fillText(rs, n.x, n.y + 30);
+
+            } else if (n.type == NType.HALL) {
+                // Nom bien centré dans le hall
+                gc.fillText(shortName, n.x, n.y - 5);
+
+                // Capacité sous le nom, sans chevauchement
+                gc.setFont(Font.font("Sans", 8));
+                gc.setFill(Color.web("#6b7280"));
+                gc.fillText("cap: " + n.cap, n.x, n.y + 10);
+
+              } else if (n.type == NType.EXIT) {
+                Font exitFont = Font.font("Sans", FontWeight.BOLD, 8);
+                String exitName = compactName(n.label, "Sortie", "S");
+                exitName = fitText(exitName, exitFont, 30);
+
+                gc.setFont(exitFont);
+                gc.setFill(txtColor);
+                gc.fillText(exitName, n.x, n.y);
+
+            } else if (n.type == NType.ROOM) {
+                // Nom centré dans la salle
+                gc.fillText(shortName, n.x, n.y);
+
+                // Capacité au-dessus à droite
+                gc.setFont(Font.font("Sans", 8));
+                gc.setFill(Color.web("#6b7280"));
+                gc.fillText("cap: " + n.cap, n.x + 34, n.y - 25);
             }
         }
+
+        // Remet le texte par défaut pour éviter de casser les autres dessins
+        gc.setTextAlign(TextAlignment.LEFT);
+        gc.setTextBaseline(VPos.BASELINE);
 
         // 🔥 fire emoji marker
         if (onFire) {
@@ -690,6 +846,21 @@ public class AdminView {
                         door.rate = 2;
                         nodes.add(door);
                         addE(edgeStart, did); addE(did, hit.id);
+                    } else if (a.type == NType.EXIT || b.type == NType.EXIT) {
+                        VNode exit = a.type == NType.EXIT ? a : b;
+                        VNode other = a.type == NType.EXIT ? b : a;
+
+                        VNode door = findDoorForExit(exit.id);
+
+                        if (door == null) {
+                            door = createDoorForExit(exit);
+                        }
+
+                        // Au lieu de relier directement à la sortie,
+                        // on relie l'autre composant à la porte de la sortie.
+                        addEIfMissing(other.id, door.id);
+                        addEIfMissing(door.id, exit.id);
+
                     } else {
                         addE(edgeStart, hit.id);
                     }
@@ -730,11 +901,27 @@ public class AdminView {
                     nodes.add(stair); setTool(null);
                 }
                 case "addExit" -> {
+                    int floor = currentFloor < 0 ? 0 : currentFloor;
+
                     String xid = newId("x");
-                    VNode exit = new VNode(xid, NType.EXIT,
-                        currentFloor < 0 ? 0 : currentFloor, mx, my, "Sortie");
-                    exit.rate = 5;
-                    nodes.add(exit); setTool(null);
+
+                    VNode exit = new VNode(
+                        xid,
+                        NType.EXIT,
+                        floor,
+                        mx,
+                        my,
+                        "Sortie"
+                    );
+
+                    nodes.add(exit);
+
+                    // Création automatique de la porte attachée à la sortie
+                    createDoorForExit(exit);
+
+                    selectedId = xid;
+                    setTool(null);
+                    showNodeInfo(xid);
                 }
                 default -> {
                     selectedId = null; clearInfoPanel();
