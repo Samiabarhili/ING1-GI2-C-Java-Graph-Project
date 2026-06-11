@@ -6,6 +6,7 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -19,1717 +20,910 @@ import javafx.stage.Stage;
 import javafx.util.Duration;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
- * Admin view — full campus map with:
- * - Click on node → statistics panel
- * - Click on agent → highlighted remaining path
- * - Real-time sensor log
- * - Play/Pause/Step controls
+ * AdminView — faithful JavaFX port of the safecampus_evacuation_system.html prototype.
+ *
+ * Graph model (pure visual, independent of the building model):
+ *   Node types : ROOM (rectangle, coloured by floor), DOOR (small square, shows rate),
+ *                HALL (circle, shows capacity), STAIR (triangle, shows rate),
+ *                EXIT (diamond, green).
+ *   Edges      : plain grey lines — no label on the edge itself.
+ *   Fire       : spreads node-by-node every 1.8 s, colour changes to red/orange.
+ *
+ * The visual graph is kept in {@code nodes} / {@code edges} lists and painted on a
+ * JavaFX Canvas that refreshes at 60 fps via a Timeline.
  */
 public class AdminView {
 
-    private static final int CW = 720, CH = 480;
-    private static final double NR = 34;
+    // ── Visual node type ──────────────────────────────────
+
+    private enum NType { ROOM, DOOR, HALL, STAIR, EXIT }
+
+    /** One visual node in the graph. */
+    private static class VNode {
+        String id, label;
+        NType  type;
+        int    floor;
+        double x, y;
+        int    cap  = 20;   // capacity (ROOM / HALL)
+        double rate = 2.0;  // flow in pers/s (DOOR / STAIR)
+
+        VNode(String id, NType type, int floor, double x, double y, String label) {
+            this.id = id; this.type = type; this.floor = floor;
+            this.x = x;   this.y = y;       this.label = label;
+        }
+    }
+
+    /** One directed edge between two nodes. */
+    private static class VEdge {
+        String id, from, to;
+        VEdge(String id, String from, String to) {
+            this.id = id; this.from = from; this.to = to;
+        }
+    }
+
+    // ── Floor colour palette ──────────────────────────────
+
+    private static final Color[][] FLOOR_FILL   = {
+        {Color.web("#dbeafe"), Color.web("#3b82f6")},  // 0 RDC  fill / stroke
+        {Color.web("#d1fae5"), Color.web("#10b981")},  // 1 1er
+        {Color.web("#fde8d8"), Color.web("#f97316")},  // 2 2e
+    };
+    private static final String[] FLOOR_NAME = {"RDC", "1er", "2e"};
+
+    // ── Canvas dimensions ─────────────────────────────────
+    private static final double CW = 720, CH = 520;
+    
+    // ── State ─────────────────────────────────────────────
 
     private final Stage stage;
     private final GraphController controller;
     private Canvas canvas;
-    private Label statusLbl;
-    private Button playPauseBtn;
-    private TextArea logArea;
-    private Timeline uiRefresh;
+    private Timeline renderLoop;
+    private Timeline fireTimer;
 
-    /** Context menu displayed on right click and hidden on the next left click. */
-    private ContextMenu graphContextMenu;
+    private final List<VNode>  nodes = new ArrayList<>();
+    private final List<VEdge>  edges = new ArrayList<>();
 
-    /** Indicates that the last mouse gesture moved a node instead of selecting it. */
-    private boolean nodeWasDragged = false;
+    private String fireNodeId = null;
+    private final Set<String> fireSpread = new HashSet<>();
 
-    private BuildingElement draggedNode = null;
-    private double dragOffsetX = 0;
-    private double dragOffsetY = 0;
-        
-    // Selection state
-    private BuildingElement selectedNode = null;
-    private Agent selectedAgent = null;
+    private String selectedId = null;
+    /** Current active tool: null, "addRoom", "addHall", "addStair", "addExit",
+     *  "addEdge", "fire", "delete". */
+    private String tool = null;
+    private String edgeStart = null;
 
-    /** Selected corridor segment when the user clicks a visual edge. */
-    private Door selectedDoor = null;
+    /** Drag state */
+    private String dragId  = null;
+    private double dragOx  = 0, dragOy = 0;
+    private boolean wasDragged = false;
 
-    // Stats panel labels
-    private Label statNameLbl, statOccLbl, statPassedLbl, statSpeedLbl, statStatusLbl;
-    private VBox statsPanel;
+    /** Floor filter: -1 = all */
+    private int currentFloor = -1;
 
-    private final Map<String, javafx.geometry.Point2D> pos = new HashMap<>();
-    /** true = fastest path (time+congestion), false = shortest path (distance) */
-    private boolean useFastestPath = false;
+    private int nodeCounter = 0;
+
+    // UI labels
+    private Label fireStatusLbl;
+    private VBox  infoPanelBox;
+    private final Map<String, Button> toolBtns = new HashMap<>();
+    private final Map<String, Button> floorBtns = new HashMap<>();
+
+    // ── Constructor ───────────────────────────────────────
 
     public AdminView(Stage stage, GraphController controller) {
-        this.stage = stage;
+        this.stage      = stage;
         this.controller = controller;
-        initPositions();
     }
 
+    // ── Public entry point ────────────────────────────────
+
     public void show() {
-        // ── Top bar ───────────────────────────────────────
-        Label role = new Label("🛡 Administrateur");
-        role.setFont(Font.font("Sans", FontWeight.BOLD, 14));
-        role.setTextFill(Color.web("#1a237e"));
-
-        statusLbl = new Label("NORMAL");
-        statusLbl.setStyle("-fx-background-color:#2e7d32;-fx-text-fill:white;" +
-            "-fx-padding:3 10;-fx-background-radius:5;-fx-font-weight:bold;");
-
-        Button backBtn = btn("← Retour", "#546e7a");
-        backBtn.setOnAction(e -> goBack());
-        Button saveBtn = btn("💾 Save", "#1565c0");
-        Button loadBtn = btn("📂 Load", "#1565c0");
-        saveBtn.setOnAction(e -> handleSave());
-        loadBtn.setOnAction(e -> handleLoad());
-
-        Region sp = new Region(); HBox.setHgrow(sp, Priority.ALWAYS);
-        HBox top = new HBox(10, backBtn, role, statusLbl, sp, saveBtn, loadBtn);
-        top.setPadding(new Insets(8, 12, 8, 12));
-        top.setAlignment(Pos.CENTER_LEFT);
-        top.setBackground(bg("#f8f9fa"));
-        top.setStyle("-fx-border-color:#e8eaed;-fx-border-width:0 0 1 0;");
-
-        // ── Canvas ────────────────────────────────────────
-        canvas = new Canvas(CW, CH);
-        setupMouseHandlers();
-        setupContextMenu();
-
-        StackPane canvasPane = new StackPane(canvas);
-        canvasPane.setBackground(bg("#0f172a"));
-        canvasPane.setMinSize(CW, CH);
-        canvasPane.setPrefSize(CW, CH);
-        canvasPane.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
-        // ── Right panel ───────────────────────────────────
-        VBox rightPanel = buildRightPanel();
-        rightPanel.setPrefWidth(250);
-
-        // ── Bottom status ─────────────────────────────────
-        Label tickLbl = new Label("Tick: 0");
-        tickLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#546e7a;");
-        Label agentCountLbl = new Label();
-        agentCountLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#546e7a;");
-        Label clickHint = new Label("Clic nœud/arête/jonction = stats · Clic agent = trajet");
-        clickHint.setStyle("-fx-font-size:10px;-fx-text-fill:#bdbdbd;-fx-font-style:italic;");
-
-        HBox statusBar = new HBox(20, tickLbl, agentCountLbl, clickHint);
-        statusBar.setPadding(new Insets(4, 12, 4, 12));
-        statusBar.setBackground(bg("#f8f9fa"));
-        statusBar.setStyle("-fx-border-color:#e8eaed;-fx-border-width:1 0 0 0;");
-
-        // ── Layout ────────────────────────────────────────
-        HBox center = new HBox(canvasPane, rightPanel);
-        HBox.setHgrow(canvasPane, Priority.ALWAYS);
+        initGraph();
 
         BorderPane root = new BorderPane();
-        root.setTop(top);
-        root.setCenter(center);
-        root.setBottom(statusBar);
-        root.setBackground(bg("white"));
+        root.setTop(buildTopBar());
+        root.setCenter(buildCenter());
 
-        Scene scene = new Scene(root, CW + 250, CH + 72);
-        scene.setFill(Color.WHITE);
+        Scene scene = new Scene(root, CW + 260, CH + 44);
         stage.setTitle("CY SafeCampus — Administration");
         stage.setScene(scene);
         stage.show();
 
-        // Wire sensor callback
-        controller.setSensorEventCallback(event -> javafx.application.Platform.runLater(() -> {
-            String icon = event.getSeverity() >= 4 ? "🔥" : event.getSeverity() >= 3 ? "⚠" : "ℹ";
-            log(icon + " [" + event.getType() + "] " + event.getLocation().getName()
-                + " — sévérité " + event.getSeverity());
-        }));
-
-        // Auto-refresh
-        uiRefresh = new Timeline(new KeyFrame(Duration.millis(150), e -> {
-            draw();
-            tickLbl.setText("Tick: " + controller.getTickCount());
-            agentCountLbl.setText("Agents: " + controller.getGraph().getAgents().size());
-            updateStatsPanel();
-        }));
-        uiRefresh.setCycleCount(Timeline.INDEFINITE);
-        uiRefresh.play();
-
-        log("Système démarré");
-        draw();
+        startRenderLoop();
     }
 
-    // ── Right Panel ───────────────────────────────────────
+    // ── Initial graph ─────────────────────────────────────
 
-    private VBox buildRightPanel() {
-        VBox panel = new VBox(10);
-        panel.setPadding(new Insets(12));
-        panel.setBackground(bg("#f8f9fa"));
-        panel.setStyle("-fx-border-color:#e8eaed;-fx-border-width:0 0 0 1;");
+    private void initGraph() {
+        nodes.clear(); edges.clear();
+        fireNodeId = null; fireSpread.clear();
+        selectedId = null; tool = null; edgeStart = null;
+        nodeCounter = 0;
 
-        // Simulation controls
-        Label simTitle = sectionLbl("Simulation");
-        playPauseBtn = btn("▶ Play", "#2e7d32");
-        Button stepBtn = btn("⏭ Step", "#546e7a");
-        Slider speedSlider = new Slider(50, 2000, 500);
-        speedSlider.setPrefWidth(210);
-        speedSlider.valueProperty().addListener((o, ov, nv) ->
-            controller.setSpeed((int)(2050 - nv.doubleValue())));
-        playPauseBtn.setOnAction(e -> {
-            if (controller.isRunning()) {
-                controller.pause(); playPauseBtn.setText("▶ Play");
-            } else {
-                controller.play(); playPauseBtn.setText("⏸ Pause");
-            }
-        });
-        stepBtn.setOnAction(e -> { controller.step(); draw(); });
-        HBox simBtns = new HBox(8, playPauseBtn, stepBtn);
-        javafx.scene.control.ToggleButton pathToggle =
-            new javafx.scene.control.ToggleButton("Chemin: Plus court");
-        pathToggle.setStyle("-fx-font-size:10px;-fx-padding:3 8;-fx-pref-width:210;");
-        pathToggle.setOnAction(e -> {
-            useFastestPath = pathToggle.isSelected();
-            pathToggle.setText(useFastestPath ? "Chemin: Plus rapide" : "Chemin: Plus court");
-            // Recompute all paths with new strategy
-            controller.getGraph().getAgents().forEach(a -> a.setPath(new java.util.ArrayList<>()));
-        });
+        // ── RDC ───────────────────────────────────────────
+        addN("h0a", NType.HALL,  0, 280, 155, "Hall RDC",   50,  2);
+        addN("r0a", NType.ROOM,  0, 100,  90, "Bureau 101", 20,  2);
+        addN("r0b", NType.ROOM,  0, 100, 210, "Amphi 102",  80,  2);
+        addN("r0c", NType.ROOM,  0, 460,  90, "LT 103",     30,  2);
+        addN("d0a", NType.DOOR,  0, 190,  90, "Porte 1",    10,  2);
+        addN("d0b", NType.DOOR,  0, 190, 210, "Porte 2",    10,  3);
+        addN("d0c", NType.DOOR,  0, 370,  90, "Porte 3",    10,  2);
+        addN("s0a", NType.STAIR, 0, 280, 290, "Escalier A", 20,  4);
+        addN("ex0", NType.EXIT,  0, 500, 155, "Sortie RDC", 50,  5);
 
-        // Alert
-        Label alertTitle = sectionLbl("Alertes");
-        Button fireBtn = btn("🔥 Déclencher alarme", "#c62828");
-        Button resetBtn = btn("↺ Reset", "#37474f");
-        fireBtn.setMaxWidth(Double.MAX_VALUE);
-        resetBtn.setMaxWidth(Double.MAX_VALUE);
-        fireBtn.setOnAction(e -> {
-            controller.triggerFireAlert();
-            statusLbl.setText("🔥 ALERTE");
-            statusLbl.setStyle("-fx-background-color:#c62828;-fx-text-fill:white;" +
-                "-fx-padding:3 10;-fx-background-radius:5;-fx-font-weight:bold;");
-            log("ALERTE INCENDIE déclenchée");
-        });
-        resetBtn.setOnAction(e -> {
-            controller.reset();
-            refreshAfterReset();
-            log("Simulation réinitialisée");
-        });
+        // ── 1er étage ─────────────────────────────────────
+        addN("h1a", NType.HALL,  1, 280, 450, "Hall 1er",   40,  2);
+        addN("r1a", NType.ROOM,  1, 100, 400, "Salle 201",  25,  2);
+        addN("r1b", NType.ROOM,  1, 100, 500, "Salle 202",  25,  2);
+        addN("r1c", NType.ROOM,  1, 460, 450, "Salle 203",  30,  2);
+        addN("d1a", NType.DOOR,  1, 190, 400, "Porte 4",    10,  2);
+        addN("d1b", NType.DOOR,  1, 190, 500, "Porte 5",    10,  2);
+        addN("d1c", NType.DOOR,  1, 370, 450, "Porte 6",    10,  2);
+        addN("s1a", NType.STAIR, 1, 440, 290, "Escalier B", 20,  4);
+        addN("ex1", NType.EXIT,  1, 500, 450, "Sortie 1er", 50,  5);
 
-        // Agents
-        Label agentTitle = sectionLbl("Agents");
-        Button addAgentBtn  = btn("+ Ajouter agent",     "#1565c0");
-        Button rmAgentBtn   = btn("- Supprimer agent",   "#546e7a");
-        Button rndAgentsBtn = btn("⚡ X agents aléat.",  "#6a1b9a");
-        addAgentBtn.setMaxWidth(Double.MAX_VALUE);
-        rmAgentBtn.setMaxWidth(Double.MAX_VALUE);
-        rndAgentsBtn.setMaxWidth(Double.MAX_VALUE);
-        Button editAgentBtn = btn("✏ Modifier agent", "#0277bd");
-        editAgentBtn.setMaxWidth(Double.MAX_VALUE);
-        editAgentBtn.setOnAction(e -> handleEditAgent());
-        addAgentBtn.setOnAction(e  -> handleAddAgent());
-        rmAgentBtn.setOnAction(e   -> handleRemoveAgent());
-        rndAgentsBtn.setOnAction(e -> handleRandomAgents());
+        // ── Edges RDC ─────────────────────────────────────
+        addE("r0a","d0a"); addE("d0a","h0a");
+        addE("r0b","d0b"); addE("d0b","h0a");
+        addE("h0a","d0c"); addE("d0c","r0c");
+        addE("h0a","s0a"); addE("s0a","ex0");
 
-        // Stats panel (shown on node/agent click)
-        Label statsTitle = sectionLbl("Sélection");
-        statNameLbl   = new Label("—");
-        statNameLbl.setFont(Font.font("Sans", FontWeight.BOLD, 12));
-        statOccLbl    = infoLbl("Occupation: —");
-        statPassedLbl = infoLbl("Agents passés: —");
-        statSpeedLbl  = infoLbl("Vitesse moy.: —");
-        statStatusLbl = infoLbl("Statut: —");
-        statsPanel = new VBox(4, statNameLbl, statOccLbl,
-            statPassedLbl, statSpeedLbl, statStatusLbl);
-        statsPanel.setPadding(new Insets(8));
-        statsPanel.setStyle("-fx-background-color:white;-fx-border-color:#e0e0e0;" +
-            "-fx-border-radius:6;-fx-background-radius:6;");
+        // ── Edges 1er ─────────────────────────────────────
+        addE("r1a","d1a"); addE("d1a","h1a");
+        addE("r1b","d1b"); addE("d1b","h1a");
+        addE("h1a","d1c"); addE("d1c","r1c");
+        addE("h1a","s1a"); addE("s1a","ex1");
 
-        // Log
-        Label logTitle = sectionLbl("Journal capteurs");
-        logArea = new TextArea();
-        logArea.setEditable(false);
-        logArea.setPrefRowCount(5);
-        logArea.setStyle("-fx-font-size:10px;-fx-font-family:monospace;");
-
-        // Legend
-        Label legTitle = sectionLbl("Légende");
-        VBox legend = new VBox(3,
-            legendRow(Color.web("#1b5e20"), "Vide (< 40%)"),
-            legendRow(Color.web("#e65100"), "Dense (40-80%)"),
-            legendRow(Color.web("#b71c1c"), "Saturé (> 80%)"),
-            legendRow(Color.web("#0d47a1"), "Sortie"),
-            legendRow(Color.web("#283593"), "Jonction / passage"),
-            legendRow(Color.web("#455a64"), "Arête sélectionnable"),
-            legendRow(Color.web("#1565c0"), "Agent calme"),
-            legendRow(Color.web("#f44336"), "Agent paniqué")
-        );
-
-        panel.getChildren().addAll(
-            simTitle, simBtns, new Label("Vitesse:"), speedSlider, pathToggle,
-            new Separator(), alertTitle, fireBtn, resetBtn,
-            new Separator(), agentTitle, addAgentBtn, editAgentBtn, rmAgentBtn, rndAgentsBtn,
-            new Separator(), statsTitle, statsPanel,
-            new Separator(), logTitle, logArea,
-            new Separator(), legTitle, legend
-        );
-
-        ScrollPane scroll = new ScrollPane(panel);
-        scroll.setFitToWidth(true);
-        scroll.setBackground(bg("#f8f9fa"));
-        scroll.setPrefWidth(250);
-
-        VBox wrapper = new VBox(scroll);
-        VBox.setVgrow(scroll, Priority.ALWAYS);
-        return wrapper;
+        // ── Cross-floor ───────────────────────────────────
+        addE("s0a","s1a");
     }
 
-    // ── Draw ──────────────────────────────────────────────
+    private void addN(String id, NType type, int floor, double x, double y,
+                      String label, int cap, double rate) {
+        VNode n = new VNode(id, type, floor, x, y, label);
+        n.cap = cap; n.rate = rate;
+        nodes.add(n);
+    }
 
-    private void draw() {
+    private void addE(String from, String to) {
+        edges.add(new VEdge("e" + (++nodeCounter), from, to));
+    }
+
+    private String newId(String prefix) {
+        return prefix + (++nodeCounter);
+    }
+
+    // ── Top bar ───────────────────────────────────────────
+
+    private HBox buildTopBar() {
+        Button backBtn = sBtn("← Retour", "#546e7a");
+        backBtn.setOnAction(e -> goBack());
+        Label title = new Label("Administrateur");
+        title.setFont(Font.font("Sans", FontWeight.BOLD, 13));
+        title.setTextFill(Color.web("#1a237e"));
+
+        Button saveBtn = sBtn("💾 Save", "#1565c0");
+        Button loadBtn = sBtn("📂 Load", "#1565c0");
+        saveBtn.setOnAction(e -> handleSave());
+        loadBtn.setOnAction(e -> handleLoad());
+
+        Region sp = new Region(); HBox.setHgrow(sp, Priority.ALWAYS);
+        HBox bar = new HBox(10, backBtn, title, sp, saveBtn, loadBtn);
+        bar.setPadding(new Insets(7, 12, 7, 12));
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setStyle("-fx-background-color:#f8f9fa;-fx-border-color:#e8eaed;-fx-border-width:0 0 1 0;");
+        return bar;
+    }
+
+    // ── Center : canvas + sidebar ─────────────────────────
+
+    private HBox buildCenter() {
+        canvas = new Canvas(CW, CH);
+        canvas.setOnMousePressed(this::onMousePressed);
+        canvas.setOnMouseDragged(this::onMouseDragged);
+        canvas.setOnMouseReleased(this::onMouseReleased);
+        canvas.setOnMouseClicked(this::onMouseClicked);
+
+        StackPane canvasWrap = new StackPane(canvas);
+        canvasWrap.setBackground(new Background(new BackgroundFill(
+            Color.web("#f0f4f8"), CornerRadii.EMPTY, Insets.EMPTY)));
+
+        // Le conteneur du graphe peut grandir avec la fenêtre
+        canvasWrap.setMinSize(CW, CH);
+        canvasWrap.setPrefSize(CW, CH);
+        canvasWrap.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
+
+        // Le canvas prend toute la place disponible
+        canvas.widthProperty().bind(canvasWrap.widthProperty());
+        canvas.heightProperty().bind(canvasWrap.heightProperty());
+
+        VBox sidebar = buildSidebar();
+
+        HBox center = new HBox(canvasWrap, sidebar);
+        HBox.setHgrow(canvasWrap, Priority.ALWAYS);
+
+        return center;
+    }
+
+    // ── Sidebar ───────────────────────────────────────────
+
+    private VBox buildSidebar() {
+        VBox sb = new VBox();
+        sb.setPrefWidth(260);
+        sb.setStyle("-fx-background-color:white;-fx-border-color:#e8eaed;-fx-border-width:0 0 0 1;");
+
+        // ── Ajouter ───────────────────────────────────────
+        sb.getChildren().add(sSection("Ajouter"));
+        HBox addBtns = new HBox(4);
+        addBtns.setPadding(new Insets(0, 10, 8, 10));
+        addBtns.setMaxWidth(Double.MAX_VALUE); 
+
+        Button bRoom  = toolBtn("btn-addRoom",  "☐ Salle",    "addRoom");
+        Button bHall  = toolBtn("btn-addHall",  "○ Hall",     "addHall");
+        Button bStair = toolBtn("btn-addStair", "△ Escalier", "addStair");
+        Button bExit  = toolBtn("btn-addExit",  "◇ Sortie",   "addExit");
+        Button bEdge  = toolBtn("btn-addEdge",  "— Lien",     "addEdge");
+        Button bDel   = toolBtn("btn-delete",   "✕ Suppr.",   "delete");
+        addBtns.getChildren().addAll(bRoom, bHall, bStair, bExit, bEdge, bDel);
+        sb.getChildren().add(addBtns);
+
+        // ── Simulation ────────────────────────────────────
+        sb.getChildren().add(sSection("Simulation"));
+        Button fireBtn  = sBtn("🔥 Déclencher feu", "#e24b4a");
+        Button resetBtn = sBtn("↺ Reset",            "#546e7a");
+        fireBtn.setOnAction(e -> setTool("fire"));
+        resetBtn.setOnAction(e -> resetFire());
+        fireStatusLbl = new Label("Aucun feu détecté");
+        fireStatusLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        VBox simBox = new VBox(4, new HBox(4, fireBtn, resetBtn), fireStatusLbl);
+        simBox.setPadding(new Insets(0, 10, 8, 10));
+        sb.getChildren().add(simBox);
+
+        // ── Étage ─────────────────────────────────────────
+        sb.getChildren().add(sSection("Étage affiché"));
+        Button fAll = floorBtn("fl-all", "Tous", -1);
+        Button f0   = floorBtn("fl-0",   "RDC",   0);
+        Button f1   = floorBtn("fl-1",   "1er",   1);
+        Button f2   = floorBtn("fl-2",   "2e",    2);
+        HBox floorBtnRow = new HBox(4, fAll, f0, f1, f2);
+        floorBtnRow.setPadding(new Insets(0, 10, 8, 10));
+        sb.getChildren().add(floorBtnRow);
+        fAll.fire(); // activate "Tous" by default
+
+        // ── Info panel ────────────────────────────────────
+        sb.getChildren().add(sSection("Propriétés"));
+        infoPanelBox = new VBox(4);
+        infoPanelBox.setPadding(new Insets(4, 10, 8, 10));
+        Label hint = new Label("Cliquez sur un élément");
+        hint.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
+        infoPanelBox.getChildren().add(hint);
+        sb.getChildren().add(infoPanelBox);
+
+        // ── Légende ───────────────────────────────────────
+        Region sp = new Region(); VBox.setVgrow(sp, Priority.ALWAYS);
+        sb.getChildren().add(sp);
+        sb.getChildren().add(buildLegend());
+
+        return sb;
+    }
+
+    private Label sSection(String text) {
+        Label l = new Label(text);
+        l.setStyle("-fx-font-size:10px;-fx-font-weight:bold;-fx-text-fill:#94a3b8;" +
+                   "-fx-padding:8 10 4 10;-fx-text-transform:uppercase;");
+        return l;
+    }
+
+    private Button toolBtn(String id, String label, String toolName) {
+        Button b = new Button(label);
+        b.setStyle(defaultBtnStyle());
+        b.setOnAction(e -> setTool(toolName));
+        toolBtns.put(id, b);
+        return b;
+    }
+
+    private Button floorBtn(String id, String label, int floor) {
+        Button b = new Button(label);
+        b.setStyle(defaultBtnStyle());
+        b.setOnAction(e -> setFloor(floor));
+        floorBtns.put(id, b);
+        return b;
+    }
+
+    private VBox buildLegend() {
+        VBox box = new VBox(3);
+        box.setPadding(new Insets(8, 10, 10, 10));
+        box.setStyle("-fx-border-color:#e8eaed;-fx-border-width:1 0 0 0;");
+        Label title = new Label("Légende");
+        title.setStyle("-fx-font-size:10px;-fx-font-weight:bold;-fx-text-fill:#94a3b8;");
+        box.getChildren().add(title);
+        box.getChildren().addAll(
+            legRow("□ bleu",   "Salle RDC"),
+            legRow("□ vert",   "Salle 1er"),
+            legRow("□ orange", "Salle 2e"),
+            legRow("■ gris",   "Porte (débit p/s affiché)"),
+            legRow("● violet", "Hall (capacité affichée)"),
+            legRow("▲ jaune",  "Escalier (débit p/s)"),
+            legRow("◆ vert",   "Sortie évacuation"),
+            legRow("■ rouge",  "Feu / propagation")
+        );
+        Label note = new Label("Arêtes = liens simples sans étiquette");
+        note.setStyle("-fx-font-size:9px;-fx-text-fill:#94a3b8;-fx-padding:4 0 0 0;");
+        box.getChildren().add(note);
+        return box;
+    }
+
+    private HBox legRow(String shape, String desc) {
+        Label s = new Label(shape);
+        s.setMinWidth(60);
+        s.setStyle("-fx-font-size:10px;-fx-text-fill:#475569;");
+        Label d = new Label(desc);
+        d.setStyle("-fx-font-size:10px;-fx-text-fill:#64748b;");
+        return new HBox(6, s, d);
+    }
+
+    // ── Render loop ───────────────────────────────────────
+
+    private void startRenderLoop() {
+        renderLoop = new Timeline(new KeyFrame(Duration.millis(16), e -> render()));
+        renderLoop.setCycleCount(Timeline.INDEFINITE);
+        renderLoop.play();
+    }
+
+    // ── Main draw ─────────────────────────────────────────
+
+    private void render() {
+        double w = canvas.getWidth();
+        double h = canvas.getHeight();
+
         GraphicsContext gc = canvas.getGraphicsContext2D();
-        Graph graph = controller.getGraph();
+        gc.clearRect(0, 0, w, h);
 
-        gc.clearRect(0, 0, CW, CH);
-        gc.setFill(Color.web("#0f172a"));
-        gc.fillRect(0, 0, CW, CH);
+        // light grid background
+        gc.setStroke(Color.web("#e2e8f0"));
+        gc.setLineWidth(0.5);
+        for (double x = 0; x < w; x += 40) gc.strokeLine(x, 0, x, h);
+        for (double y = 0; y < h; y += 40) gc.strokeLine(0, y, w, y);
+            List<VNode> visible = visibleNodes();
+            Set<String> visIds  = new HashSet<>();
+            visible.forEach(n -> visIds.add(n.id));
+
+        // ── Floor separator label ─────────────────────────
+        if (currentFloor == -1) {
+            gc.setStroke(Color.web("#cbd5e1")); gc.setLineWidth(1);
+            gc.setLineDashes(6, 4);
+            gc.strokeLine(0, 330, w, 330);
+            gc.setLineDashes(0);
+            gc.setFill(Color.web("#94a3b8"));
+            gc.setFont(Font.font("Sans", 10));
+            gc.fillText("RDC", 8, 320);
+            gc.fillText("1er étage", 8, 345);
+        }
 
         // ── Edges ─────────────────────────────────────────
-        drawEdgesFromModel(gc);
-        // ── Selected agent path highlight ─────────────────
-        if (selectedAgent != null && selectedAgent.getPath() != null) {
-            List<BuildingElement> path = selectedAgent.getPath();
-
-            gc.setStroke(Color.web("#ff9800"));
-            gc.setLineWidth(3.5);
-            gc.setLineDashes(8, 4);
-
-            for (int i = selectedAgent.getPathIndex(); i < path.size() - 1; i++) {
-                javafx.geometry.Point2D a = getPositionForElement(path.get(i));
-                javafx.geometry.Point2D b = getPositionForElement(path.get(i + 1));
-
-                if (a != null && b != null) {
-                    gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
-                }
-            }
-
-            gc.setLineDashes(0);
+        gc.setStroke(Color.web("#94a3b8")); gc.setLineWidth(1.5);
+        for (VEdge e : edges) {
+            VNode a = byId(e.from), b = byId(e.to);
+            if (a == null || b == null) continue;
+            if (!visIds.contains(a.id) || !visIds.contains(b.id)) continue;
+            gc.strokeLine(a.x, a.y, b.x, b.y);
         }
 
         // ── Nodes ─────────────────────────────────────────
-        // Rooms and exits are displayed as large nodes. Passages are displayed
-        // as compact density markers. Internal passage connectors stay hidden.
-        for (BuildingElement el : graph.getElements()) {
-            if (el.getName().contains("↔") || el instanceof Passage) continue;
-
-            javafx.geometry.Point2D p = getPositionForElement(el);
-            if (p == null) continue;
-
-            boolean selected = el.equals(selectedNode);
-            drawNode(gc, el, p.getX(), p.getY(), selected);
-        }
-
-        drawPassageAndJunctionMarkers(gc);
-
-        // ── Agents ────────────────────────────────────────
-        for (Agent a : graph.getAgents()) {
-            javafx.geometry.Point2D p = agentPos(a);
-
-            if (p != null) {
-                drawAgent(gc, p.getX(), p.getY(), a, a.equals(selectedAgent));
-            }
-        }
-    }
-    /**
-     * Draws all graph edges. Regular room-to-passage doors are drawn directly,
-     * while internal passage-to-passage connectors are rendered as one corridor
-     * line between the two passages without displaying an extra junction node.
-     *
-     * @param gc canvas graphics context
-     */
-    private void drawEdgesFromModel(GraphicsContext gc) {
-        for (Passage passage : controller.getGraph().getPassages()) {
-            javafx.geometry.Point2D passagePos = getPositionForElement(passage);
-
-            if (passagePos == null) {
-                continue;
-            }
-
-            for (Door door : passage.getConnectedDoors()) {
-                Room room = door.getRoom();
-
-                if (room == null || isInternalPassageConnector(room)) {
-                    continue;
-                }
-
-                javafx.geometry.Point2D roomPos = getPositionForElement(room);
-
-                if (roomPos == null) {
-                    continue;
-                }
-
-                drawDensityEdge(gc, roomPos, passagePos, door);
-            }
-        }
-
-        drawInternalPassageConnectors(gc);
+        for (VNode n : visible) drawNode(gc, n);
     }
 
-    /**
-     * Draws hidden passage-to-passage connector rooms as direct corridor lines.
-     * This prevents useless extra junction dots from appearing on the map.
-     *
-     * @param gc canvas graphics context
-     */
-    private void drawInternalPassageConnectors(GraphicsContext gc) {
-        for (BuildingElement element : controller.getGraph().getElements()) {
-            if (!(element instanceof Room) || !isInternalPassageConnector((Room) element)) {
-                continue;
-            }
+    private void drawNode(GraphicsContext gc, VNode n) {
+        boolean onFire  = n.id.equals(fireNodeId);
+        boolean spread  = fireSpread.contains(n.id);
+        boolean sel     = n.id.equals(selectedId);
 
-            List<Door> doors = ((Room) element).getDoors();
-            if (doors.size() < 2) {
-                continue;
-            }
-
-            Passage firstPassage = doors.get(0).getPassage();
-            Passage secondPassage = doors.get(1).getPassage();
-            javafx.geometry.Point2D firstPosition = getPositionForElement(firstPassage);
-            javafx.geometry.Point2D secondPosition = getPositionForElement(secondPassage);
-
-            if (firstPosition == null || secondPosition == null) {
-                continue;
-            }
-
-            drawDensityEdge(gc, firstPosition, secondPosition, doors.get(0));
+        Color fill, stroke;
+        if (onFire) {
+            fill   = Color.web("#ff3333");
+            stroke = Color.web("#aa0000");
+        } else if (spread) {
+            fill   = Color.web("#ff8800");
+            stroke = Color.web("#cc5500");
+        } else {
+            int f = Math.min(n.floor, FLOOR_FILL.length - 1);
+            fill   = switch (n.type) {
+                case DOOR  -> Color.web("#f8fafc");
+                case HALL  -> Color.web("#ede9fe");
+                case STAIR -> Color.web("#fef9c3");
+                case EXIT  -> Color.web("#dcfce7");
+                default    -> FLOOR_FILL[f][0];
+            };
+            stroke = switch (n.type) {
+                case DOOR  -> Color.web("#6b7280");
+                case HALL  -> Color.web("#7c3aed");
+                case STAIR -> Color.web("#ca8a04");
+                case EXIT  -> Color.web("#16a34a");
+                default    -> FLOOR_FILL[f][1];
+            };
         }
-    }
-
-    /**
-     * Draws one selectable corridor segment with a color based on its own
-     * density. A corridor segment is represented by a Door object.
-     *
-     * @param gc canvas graphics context
-     * @param from start position
-     * @param to end position
-     * @param door corridor segment used to compute density and capacity
-     */
-    private void drawDensityEdge(
-            GraphicsContext gc,
-            javafx.geometry.Point2D from,
-            javafx.geometry.Point2D to,
-            Door door
-    ) {
-        if (from == null || to == null || door == null) {
-            return;
-        }
-
-        Color edgeColor = densityColorFromRatio(densityRatioOfDoor(door));
-        boolean selected = door == selectedDoor;
-
-        gc.setStroke(edgeColor);
-        gc.setLineWidth(selected ? 8.0 : 5.0);
-        gc.strokeLine(from.getX(), from.getY(), to.getX(), to.getY());
-
-        gc.setStroke(Color.rgb(255, 255, 255, selected ? 0.45 : 0.20));
-        gc.setLineWidth(selected ? 2.5 : 1.2);
-        gc.strokeLine(from.getX(), from.getY(), to.getX(), to.getY());
-
-        drawDoorCapacityLabel(gc, from, to, door);
-    }
-
-    /**
-     * Draws the occupation/capacity label of a corridor segment near its middle.
-     *
-     * @param gc canvas graphics context
-     * @param from start position
-     * @param to end position
-     * @param door corridor segment to label
-     */
-    private void drawDoorCapacityLabel(
-            GraphicsContext gc,
-            javafx.geometry.Point2D from,
-            javafx.geometry.Point2D to,
-            Door door
-    ) {
-        double midX = (from.getX() + to.getX()) / 2.0;
-        double midY = (from.getY() + to.getY()) / 2.0;
-        String label = visualOccupancyOfDoor(door) + "/" + door.getMaxCapacity();
-
-        gc.setFill(Color.web("#e5e7eb"));
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 8));
-        gc.fillText(label, midX + 5.0, midY - 5.0);
-    }
-
-    /**
-     * Draws compact density markers for real passages only.
-     *
-     * @param gc canvas graphics context
-     */
-    private void drawPassageAndJunctionMarkers(GraphicsContext gc) {
-        for (Passage passage : controller.getGraph().getPassages()) {
-            drawCompactMarker(gc, passage, false);
-        }
-    }
-
-    /**
-     * Draws a small density marker for a real passage.
-     *
-     * @param gc canvas graphics context
-     * @param element element to draw
-     * @param virtualJunction kept for compatibility; internal connector nodes are not drawn
-     */
-    private void drawCompactMarker(GraphicsContext gc, BuildingElement element, boolean virtualJunction) {
-        javafx.geometry.Point2D p = getPositionForElement(element);
-
-        if (p == null) {
-            return;
-        }
-
-        boolean selected = element.equals(selectedNode);
-        double radius = virtualJunction ? 5.5 : 8.5;
-
-        if (selected) {
-            radius += 3.0;
-        }
-
-        gc.setFill(densityColorFromRatio(densityRatioWithMovingAgents(element)));
-        gc.setStroke(selected ? Color.WHITE : Color.web("#cfd8dc"));
-        gc.setLineWidth(selected ? 3.0 : 1.4);
-        gc.fillOval(p.getX() - radius, p.getY() - radius, radius * 2.0, radius * 2.0);
-        gc.strokeOval(p.getX() - radius, p.getY() - radius, radius * 2.0, radius * 2.0);
-
-        String occupancy = String.valueOf(visualOccupancyOf(element));
-        gc.setFill(Color.web("#eeeeee"));
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 8));
-        gc.fillText(occupancy, p.getX() + radius + 4.0, p.getY() - radius - 2.0);
-
-        if (!virtualJunction) {
-            String label = shortName(element.getName());
-            gc.setFill(Color.web("#cfd8dc"));
-            gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
-            gc.fillText(label, p.getX() - label.length() * 2.8, p.getY() + radius + 13.0);
-        }
-    }
-
-    /**
-     * Returns a visual color for a density ratio.
-     *
-     * @param ratio density ratio
-     * @return green, orange or red color
-     */
-    private Color densityColorFromRatio(double ratio) {
-        double clamped = Math.max(0.0, Math.min(1.0, ratio));
-
-        if (clamped >= 0.8) {
-            return Color.web("#b71c1c");
-        }
-
-        if (clamped >= 0.4) {
-            return Color.web("#e65100");
-        }
-
-        return Color.web("#1b5e20");
-    }
-
-    /**
-     * Computes density using stored occupancy and agents currently moving toward an element.
-     *
-     * @param element inspected element
-     * @return density ratio between zero and one
-     */
-    private double densityRatioWithMovingAgents(BuildingElement element) {
-        if (element == null || element.getMaxCapacity() <= 0) {
-            return 0.0;
-        }
-
-        return Math.max(0.0, Math.min(1.0,
-            (double) visualOccupancyOf(element) / element.getMaxCapacity()));
-    }
-
-    /**
-     * Computes the density ratio of a corridor segment.
-     *
-     * @param door corridor segment
-     * @return density ratio between zero and one
-     */
-    private double densityRatioOfDoor(Door door) {
-        if (door == null || door.getMaxCapacity() <= 0) {
-            return 0.0;
-        }
-
-        return Math.max(0.0, Math.min(1.0,
-            (double) visualOccupancyOfDoor(door) / door.getMaxCapacity()));
-    }
-
-    /**
-     * Counts agents visually present inside a corridor segment. Agents are
-     * counted only while they are progressing between the segment endpoints.
-     *
-     * @param door corridor segment
-     * @return number of agents moving inside this segment
-     */
-    private int visualOccupancyOfDoor(Door door) {
-        if (door == null) {
-            return 0;
-        }
-
-        Room room = door.getRoom();
-        if (isInternalPassageConnector(room)) {
-            int total = 0;
-            for (Door segment : room.getDoors()) {
-                total += visualOccupancyOfSingleDoor(segment);
-            }
-            return total;
-        }
-
-        return visualOccupancyOfSingleDoor(door);
-    }
-
-    /**
-     * Counts agents visually present inside one model door segment.
-     *
-     * @param door inspected door segment
-     * @return number of agents moving inside the segment
-     */
-    private int visualOccupancyOfSingleDoor(Door door) {
-        int count = 0;
-        Room room = door.getRoom();
-        Passage passage = door.getPassage();
-
-        for (Agent agent : controller.getGraph().getAgents()) {
-            if (agent.getProgress() <= 0.0) {
-                continue;
-            }
-
-            BuildingElement current = agent.getCurrentLocation();
-            BuildingElement next = agent.getNextInPath();
-
-            if (isSameSegment(current, next, room, passage)) {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    /**
-     * Checks whether two path endpoints match a corridor segment.
-     *
-     * @param current first path endpoint
-     * @param next second path endpoint
-     * @param room room-like endpoint of the segment
-     * @param passage passage endpoint of the segment
-     * @return true when both endpoints describe the same segment
-     */
-    private boolean isSameSegment(BuildingElement current, BuildingElement next, Room room, Passage passage) {
-        return (current == room && next == passage) || (current == passage && next == room);
-    }
-
-    /**
-     * Counts agents visually present on an element, including agents in motion.
-     *
-     * @param element inspected element
-     * @return visual occupancy
-     */
-    private int visualOccupancyOf(BuildingElement element) {
-        if (element == null) {
-            return 0;
-        }
-
-        int count = 0;
-
-        for (Agent agent : controller.getGraph().getAgents()) {
-            BuildingElement current = agent.getCurrentLocation();
-            BuildingElement next = agent.getNextInPath();
-
-            if (element.equals(current)) {
-                count++;
-            } else if (agent.getProgress() > 0.0 && element.equals(next)) {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private javafx.geometry.Point2D getPositionForElement(BuildingElement el) {
-        if (el.getName().contains("↔")) {
-            return getJunctionPosition(el);
-        }
-
-        javafx.geometry.Point2D p = pos.get(el.getName());
-
-        if (p != null) {
-            return p;
-        }
-
-        if (el.getX() != 0.0 || el.getY() != 0.0) {
-            p = new javafx.geometry.Point2D(el.getX(), el.getY());
-            pos.put(el.getName(), p);
-            return p;
-        }
-
-        return null;
-    }
-
-    private javafx.geometry.Point2D getJunctionPosition(BuildingElement junction) {
-        String name = junction.getName();
-
-        if (!name.contains("↔")) {
-            return pos.get(name);
-        }
-
-        String[] parts = name.split("↔");
-
-        if (parts.length != 2) {
-            return null;
-        }
-
-        javafx.geometry.Point2D a = pos.get(parts[0]);
-        javafx.geometry.Point2D b = pos.get(parts[1]);
-
-        if (a == null || b == null) {
-            return null;
-        }
-
-        return new javafx.geometry.Point2D(
-            (a.getX() + b.getX()) / 2.0,
-            (a.getY() + b.getY()) / 2.0
-        );
-    }
-
-    private void drawDefaultEdges(GraphicsContext gc) {
-        gc.setStroke(Color.web("#455a64"));
-        gc.setLineWidth(3.0);
-
-        drawEdge(gc, "Réserve", "Palier Esc. 1");
-        drawEdge(gc, "Palier Esc. 1", "Jonction Nord");
-
-        drawEdge(gc, "Bureau 1", "Jonction Nord");
-        drawEdge(gc, "Bureau 2", "Jonction Nord");
-
-        drawEdge(gc, "Jonction Nord", "Palier Esc. 2");
-        drawEdge(gc, "Palier Esc. 2", "Jonction Centrale");
-
-        drawEdge(gc, "LT Serveurs", "Jonction Centrale");
-        drawEdge(gc, "Bureau 3", "Jonction Centrale");
-
-        drawEdge(gc, "Jonction Centrale", "Sortie Est 1");
-        drawEdge(gc, "Jonction Centrale", "Sortie Est 2");
-        drawEdge(gc, "Jonction Centrale", "Sortie Est 3");
-
-        drawEdge(gc, "Amphithéâtre", "Jonction Sud");
-        drawEdge(gc, "Logement", "Jonction Sud");
-        drawEdge(gc, "Jonction Sud", "Jonction Centrale");
-        drawEdge(gc, "Sortie Ouest", "Jonction Sud");
-    }
-
-    private void drawEdge(GraphicsContext gc, String from, String to) {
-        javafx.geometry.Point2D a = pos.get(from);
-        javafx.geometry.Point2D b = pos.get(to);
-
-        if (a == null || b == null) {
-            System.out.println("Missing edge position: " + from + " -> " + to);
-            return;
-        }
-
-        gc.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
-    }
-
-    private void drawNode(GraphicsContext gc, BuildingElement el, double x, double y, boolean selected) {
-        Color fill = nodeColor(el);
-        Color stroke = selected ? Color.web("#ff9800") : Color.web("#9e9e9e");
-        double strokeW = selected ? 3.0 : 1.2;
 
         gc.setFill(fill);
         gc.setStroke(stroke);
-        gc.setLineWidth(strokeW);
+        gc.setLineWidth(sel ? 2.5 : 1.8);
 
-        if (el instanceof Exit) {
-            gc.fillRoundRect(x - 46, y - 16, 92, 32, 10, 10);
-            gc.strokeRoundRect(x - 46, y - 16, 92, 32, 10, 10);
-        } else if (el instanceof Passage) {
-        double[] xs = {x, x + 42, x, x - 42};
-        double[] ys = {y - 26, y, y + 26, y};
-        gc.fillPolygon(xs, ys, 4);
-        gc.strokePolygon(xs, ys, 4);
-        } else {
-            gc.fillOval(x - NR, y - NR, NR * 2, NR * 2);
-            gc.strokeOval(x - NR, y - NR, NR * 2, NR * 2);
+        switch (n.type) {
+            case ROOM  -> { gc.fillRoundRect(n.x-34, n.y-20, 68, 40, 6, 6);
+                            gc.strokeRoundRect(n.x-34, n.y-20, 68, 40, 6, 6); }
+            case HALL  -> { gc.fillOval(n.x-24, n.y-24, 48, 48);
+                            gc.strokeOval(n.x-24, n.y-24, 48, 48); }
+            case STAIR -> { double[] xs = {n.x, n.x+22, n.x-22};
+                            double[] ys = {n.y-22, n.y+16, n.y+16};
+                            gc.fillPolygon(xs, ys, 3);
+                            gc.strokePolygon(xs, ys, 3); }
+            case DOOR  -> { gc.fillRect(n.x-9, n.y-9, 18, 18);
+                            gc.strokeRect(n.x-9, n.y-9, 18, 18); }
+            case EXIT  -> { double[] xs = {n.x, n.x+20, n.x, n.x-20};
+                            double[] ys = {n.y-20, n.y, n.y+20, n.y};
+                            gc.fillPolygon(xs, ys, 4);
+                            gc.strokePolygon(xs, ys, 4); }
         }
 
-        String name = shortName(el.getName());
-
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Sans", FontWeight.BOLD, 10));
-
-        if (el instanceof Passage && name.contains(" ")) {
-            String[] parts = name.split(" ", 2);
-            gc.fillText(parts[0], x - parts[0].length() * 2.8, y - 3);
-            gc.fillText(parts[1], x - parts[1].length() * 2.8, y + 10);
-        } else {
-            gc.fillText(name, x - name.length() * 2.8, y + 3);
+        // selection ring
+        if (sel) {
+            gc.setStroke(Color.web("#3b82f6"));
+            gc.setLineWidth(2);
+            gc.setLineDashes(4, 2);
+            gc.strokeOval(n.x - 32, n.y - 32, 64, 64);
+            gc.setLineDashes(0);
         }
-        if (!(el instanceof Exit)) {
-            String occ = el.getCurrentOccupancy() + "/" + el.getMaxCapacity();
 
-            gc.setFill(Color.web("#eeeeee"));
+        // Labels
+        Color txtColor = (onFire || spread) ? Color.WHITE
+                       : n.type == NType.HALL  ? Color.web("#3b0764")
+                       : n.type == NType.STAIR ? Color.web("#78350f")
+                       : n.type == NType.EXIT  ? Color.web("#14532d")
+                       : FLOOR_FILL[Math.min(n.floor, FLOOR_FILL.length-1)][1];
+
+        gc.setFill(txtColor);
+
+        if (n.type == NType.DOOR) {
+            // Show rate inside the square
+            gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
+            String rateStr = String.format("%.0f", n.rate);
+            gc.fillText(rateStr, n.x - rateStr.length() * 2.5, n.y + 3);
+            gc.setFill(Color.web("#94a3b8"));
             gc.setFont(Font.font("Sans", 8));
-            gc.fillText(
-                occ,
-                x - occ.length() * 2.2,
-                y + NR + 11
-            );
-        }
-    }
+            gc.fillText("p/s", n.x - 5, n.y + 17);
+        } else {
+            // Name label
+            gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
+            String short_ = n.label.length() > 11 ? n.label.substring(0, 10) + "…" : n.label;
+            gc.fillText(short_, n.x - short_.length() * 2.5, n.y + 4);
 
-    private String shortName(String name) {
-        return switch (name) {
-            case "Jonction Centrale" -> "J. Centrale";
-            case "Jonction Nord" -> "J. Nord";
-            case "Jonction Sud" -> "J. Sud";
-            case "Palier Esc. 1" -> "P. Esc. 1";
-            case "Palier Esc. 2" -> "P. Esc. 2";
-            default -> name.length() > 14 ? name.substring(0, 13) + "…" : name;
-        };
-    }
+            // Capacity badge for ROOM / HALL
+            if (n.type == NType.ROOM || n.type == NType.HALL) {
+                gc.setFill(Color.web("#6b7280"));
+                gc.setFont(Font.font("Sans", 8));
+                gc.fillText("cap:" + n.cap,
+                    n.x + (n.type == NType.ROOM ? 32 : 22),
+                    n.y - (n.type == NType.ROOM ? 22 : 26));
+            }
 
-    private void drawAgent(GraphicsContext gc, double x, double y, Agent a, boolean selected) {
-        Color c = a.getState() == AgentState.PANICKED
-            ? Color.web("#f44336")
-            : Color.web("#1565c0");
-
-        if (selected) {
-            gc.setFill(Color.web("#ff980066"));
-            gc.fillOval(x - 14, y - 18, 28, 28);
+            // Rate badge for STAIR
+            if (n.type == NType.STAIR) {
+                gc.setFont(Font.font("Sans", FontWeight.BOLD, 9));
+                String rs = String.format("%.0fp/s", n.rate);
+                gc.fillText(rs, n.x - rs.length() * 2.5, n.y + 4);
+            }
         }
 
-        gc.setStroke(c);
-        gc.setFill(c);
-        gc.setLineWidth(1.8);
-
-        gc.fillOval(x - 4, y - 13, 8, 8);
-        gc.strokeLine(x, y - 5, x, y + 6);
-        gc.strokeLine(x - 5, y, x + 5, y);
-        gc.strokeLine(x, y + 6, x - 4, y + 13);
-        gc.strokeLine(x, y + 6, x + 4, y + 13);
+        // 🔥 fire emoji marker
+        if (onFire) {
+            gc.setFont(Font.font("Sans", 14));
+            gc.setFill(Color.BLACK);
+            gc.fillText("🔥", n.x + 30, n.y - 20);
+        }
     }
 
     // ── Mouse handlers ────────────────────────────────────
 
-    /**
-     * Registers mouse handlers for dragging nodes and selecting agents, nodes,
-     * passages, virtual junctions or edges.
-     */
-    private void setupMouseHandlers() {
+    private void onMousePressed(javafx.scene.input.MouseEvent e) {
+        if (!e.isPrimaryButtonDown()) return;
+        double mx = e.getX(), my = e.getY();
+        wasDragged = false;
+        VNode hit = hitNode(mx, my);
+        if (hit != null && tool == null) {
+            dragId = hit.id; dragOx = e.getX(); dragOy = e.getY();
+        }
+    }
 
-        canvas.setOnMousePressed(e -> {
-            if (graphContextMenu != null && graphContextMenu.isShowing()) {
-                graphContextMenu.hide();
+    private void onMouseDragged(javafx.scene.input.MouseEvent e) {
+        if (dragId == null) return;
+        wasDragged = true;
+        VNode n = byId(dragId);
+        if (n != null) {
+            n.x += e.getX() - dragOx;
+            n.y += e.getY() - dragOy;
+            // clamp
+            double w = canvas.getWidth();
+            double h = canvas.getHeight();
+
+            n.x = Math.max(30, Math.min(w - 30, n.x));
+            n.y = Math.max(30, Math.min(h - 30, n.y));
+        }
+        dragOx = e.getX(); dragOy = e.getY();
+    }
+
+    private void onMouseReleased(javafx.scene.input.MouseEvent e) {
+        dragId = null;
+    }
+
+    private void onMouseClicked(javafx.scene.input.MouseEvent e) {
+        if (wasDragged) { wasDragged = false; return; }
+        double mx = e.getX(), my = e.getY();
+        VNode hit = hitNode(mx, my);
+
+        // ── Tool: fire ────────────────────────────────────
+        if ("fire".equals(tool)) {
+            if (hit != null) {
+                fireNodeId = hit.id; fireSpread.clear();
+                startFire(); setTool(null);
             }
+            return;
+        }
 
-            if (!e.isPrimaryButtonDown()) {
-                return;
+        // ── Tool: delete ──────────────────────────────────
+        if ("delete".equals(tool)) {
+            if (hit != null) {
+                deleteNode(hit.id); setTool(null);
+                clearInfoPanel();
             }
+            return;
+        }
 
-            double mx = e.getX();
-            double my = e.getY();
-            nodeWasDragged = false;
-            draggedNode = findDraggableElementAt(mx, my);
-
-            if (draggedNode != null) {
-                javafx.geometry.Point2D p = getPositionForElement(draggedNode);
-
-                if (p != null) {
-                    dragOffsetX = mx - p.getX();
-                    dragOffsetY = my - p.getY();
+        // ── Tool: addEdge ─────────────────────────────────
+        if ("addEdge".equals(tool)) {
+            if (hit != null) {
+                if (edgeStart == null) {
+                    edgeStart = hit.id;
+                    showInfo("Cliquez sur le 2e nœud à connecter");
+                } else if (!edgeStart.equals(hit.id)) {
+                    VNode a = byId(edgeStart), b = hit;
+                    if (a.type == NType.HALL && b.type == NType.HALL) {
+                        // auto-insert a door between two halls
+                        String did = newId("d");
+                        VNode door = new VNode(did, NType.DOOR, a.floor,
+                            (a.x + b.x) / 2, (a.y + b.y) / 2, "Porte");
+                        door.rate = 2;
+                        nodes.add(door);
+                        addE(edgeStart, did); addE(did, hit.id);
+                    } else {
+                        addE(edgeStart, hit.id);
+                    }
+                    edgeStart = null; setTool(null);
                 }
             }
-        });
+            return;
+        }
 
-        canvas.setOnMouseDragged(e -> {
-            if (draggedNode == null) return;
-
-            nodeWasDragged = true;
-
-            double newX = e.getX() - dragOffsetX;
-            double newY = e.getY() - dragOffsetY;
-
-            newX = Math.max(NR, Math.min(CW - NR, newX));
-            newY = Math.max(NR, Math.min(CH - NR, newY));
-
-            pos.put(draggedNode.getName(), new javafx.geometry.Point2D(newX, newY));
-            draggedNode.setPosition(newX, newY);
-
-            draw();
-        });
-
-        canvas.setOnMouseReleased(e -> {
-            if (draggedNode != null) {
-                javafx.geometry.Point2D p = pos.get(draggedNode.getName());
-
-                if (p != null) {
-                    draggedNode.setPosition(p.getX(), p.getY());
+        // ── Tool: addRoom / addHall / addStair / addExit ──
+        if (hit == null) {
+            switch (tool == null ? "" : tool) {
+                case "addRoom" -> {
+                    String rid = newId("r"), did = newId("d");
+                    VNode room = new VNode(rid, NType.ROOM,
+                        currentFloor < 0 ? 0 : currentFloor, mx, my, "Salle");
+                    room.cap = 20;
+                    nodes.add(room);
+                    VNode door = new VNode(did, NType.DOOR,
+                        currentFloor < 0 ? 0 : currentFloor, mx + 50, my, "Porte");
+                    door.rate = 2;
+                    nodes.add(door);
+                    addE(rid, did);
+                    selectedId = rid; setTool(null); showNodeInfo(rid);
+                }
+                case "addHall" -> {
+                    String hid = newId("h");
+                    VNode hall = new VNode(hid, NType.HALL,
+                        currentFloor < 0 ? 0 : currentFloor, mx, my, "Hall");
+                    hall.cap = 40;
+                    nodes.add(hall); setTool(null);
+                }
+                case "addStair" -> {
+                    String sid = newId("s");
+                    VNode stair = new VNode(sid, NType.STAIR,
+                        currentFloor < 0 ? 0 : currentFloor, mx, my, "Escalier");
+                    stair.rate = 4;
+                    nodes.add(stair); setTool(null);
+                }
+                case "addExit" -> {
+                    String xid = newId("x");
+                    VNode exit = new VNode(xid, NType.EXIT,
+                        currentFloor < 0 ? 0 : currentFloor, mx, my, "Sortie");
+                    exit.rate = 5;
+                    nodes.add(exit); setTool(null);
+                }
+                default -> {
+                    selectedId = null; clearInfoPanel();
                 }
             }
+            return;
+        }
 
-            draggedNode = null;
-        });
-
-        canvas.setOnMouseClicked(e -> {
-            if (nodeWasDragged) {
-                nodeWasDragged = false;
-                return;
-            }
-
-            double mx = e.getX();
-            double my = e.getY();
-
-            Agent clickedAgent = findAgentAt(mx, my);
-
-            if (clickedAgent != null) {
-                selectedAgent = (selectedAgent == clickedAgent) ? null : clickedAgent;
-                selectedNode = null;
-                selectedDoor = null;
-                draw();
-                updateStatsPanel();
-                return;
-            }
-
-            BuildingElement clickedElement = findSelectableElementAt(mx, my);
-
-            if (clickedElement != null) {
-                selectedNode = (selectedNode == clickedElement) ? null : clickedElement;
-                selectedDoor = null;
-                selectedAgent = null;
-                draw();
-                updateStatsPanel();
-                return;
-            }
-
-            Door clickedDoor = findDoorAt(mx, my);
-            selectedDoor = (selectedDoor == clickedDoor) ? null : clickedDoor;
-            selectedNode = null;
-            selectedAgent = null;
-            draw();
-            updateStatsPanel();
-        });
+        // ── No tool: select node ──────────────────────────
+        selectedId = hit.id;
+        showNodeInfo(hit.id);
     }
 
-    /**
-     * Finds an agent close to the mouse position.
-     *
-     * @param mx mouse x coordinate
-     * @param my mouse y coordinate
-     * @return selected agent or null
-     */
-    private Agent findAgentAt(double mx, double my) {
-        for (Agent agent : controller.getGraph().getAgents()) {
-            javafx.geometry.Point2D p = agentPos(agent);
+    // ── Tool / floor management ───────────────────────────
 
-            if (p != null && Math.hypot(p.getX() - mx, p.getY() - my) < 14) {
-                return agent;
-            }
-        }
-
-        return null;
+    private void setTool(String t) {
+        tool = t; edgeStart = null;
+        toolBtns.forEach((id, btn) -> btn.setStyle(defaultBtnStyle()));
+        String active = switch (t == null ? "" : t) {
+            case "addRoom"  -> "btn-addRoom";
+            case "addHall"  -> "btn-addHall";
+            case "addStair" -> "btn-addStair";
+            case "addExit"  -> "btn-addExit";
+            case "addEdge"  -> "btn-addEdge";
+            case "delete"   -> "btn-delete";
+            case "fire"     -> "";
+            default         -> "";
+        };
+        if (!active.isEmpty() && toolBtns.containsKey(active))
+            toolBtns.get(active).setStyle(activeBtnStyle());
+        canvas.setCursor(t != null ? Cursor.CROSSHAIR : Cursor.DEFAULT);
     }
 
-    /**
-     * Finds an element that can be dragged.
-     *
-     * @param mx mouse x coordinate
-     * @param my mouse y coordinate
-     * @return draggable element or null
-     */
-    private BuildingElement findDraggableElementAt(double mx, double my) {
-        for (BuildingElement element : controller.getGraph().getElements()) {
-            if (element.getName().contains("↔")) {
-                continue;
-            }
-
-            javafx.geometry.Point2D p = getPositionForElement(element);
-
-            if (p == null) {
-                continue;
-            }
-
-            double tolerance = element instanceof Passage ? 14.0 : NR + 8.0;
-
-            if (Math.hypot(p.getX() - mx, p.getY() - my) <= tolerance) {
-                return element;
-            }
-        }
-
-        return null;
+    private void setFloor(int f) {
+        currentFloor = f;
+        floorBtns.forEach((id, btn) -> btn.setStyle(defaultBtnStyle()));
+        String active = switch (f) {
+            case -1 -> "fl-all";
+            case  0 -> "fl-0";
+            case  1 -> "fl-1";
+            case  2 -> "fl-2";
+            default -> "fl-all";
+        };
+        if (floorBtns.containsKey(active))
+            floorBtns.get(active).setStyle(activeBtnStyle());
     }
 
-    /**
-     * Finds a visible node or passage marker. Hidden internal connectors are ignored.
-     *
-     * @param mx mouse x coordinate
-     * @param my mouse y coordinate
-     * @return selected element or null
-     */
-    private BuildingElement findSelectableElementAt(double mx, double my) {
-        for (BuildingElement element : controller.getGraph().getElements()) {
-            javafx.geometry.Point2D p = getPositionForElement(element);
+    // ── Fire simulation ───────────────────────────────────
 
-            if (p == null) {
-                continue;
-            }
-
-            if (element instanceof Room && isInternalPassageConnector((Room) element)) {
-                continue;
-            }
-
-            double tolerance;
-
-            if (element instanceof Passage) {
-                tolerance = 16.0;
-            } else {
-                tolerance = NR + 8.0;
-            }
-
-            if (Math.hypot(p.getX() - mx, p.getY() - my) <= tolerance) {
-                return element;
-            }
-        }
-
-        return null;
+    private void startFire() {
+        if (fireTimer != null) fireTimer.stop();
+        fireTimer = new Timeline(new KeyFrame(Duration.millis(1800), e -> spreadFire()));
+        fireTimer.setCycleCount(Timeline.INDEFINITE);
+        fireTimer.play();
+        updateFireStatus();
+        // Sync with Java model
+        controller.triggerFireAlert();
     }
 
-    /**
-     * Finds the corridor segment represented by the clicked visual edge.
-     *
-     * @param mx mouse x coordinate
-     * @param my mouse y coordinate
-     * @return selected corridor segment, or null
-     */
-    private Door findDoorAt(double mx, double my) {
-        javafx.geometry.Point2D click = new javafx.geometry.Point2D(mx, my);
-
-        for (BuildingElement element : controller.getGraph().getElements()) {
-            if (!(element instanceof Room) || !isInternalPassageConnector((Room) element)) {
-                continue;
-            }
-
-            List<Door> doors = ((Room) element).getDoors();
-            if (doors.size() < 2) {
-                continue;
-            }
-
-            javafx.geometry.Point2D first = getPositionForElement(doors.get(0).getPassage());
-            javafx.geometry.Point2D second = getPositionForElement(doors.get(1).getPassage());
-
-            if (first != null && second != null && distanceToSegment(click, first, second) <= 13.0) {
-                return doors.get(0);
+    private void spreadFire() {
+        List<String> frontier = new ArrayList<>();
+        if (fireNodeId != null) frontier.add(fireNodeId);
+        frontier.addAll(fireSpread);
+        Set<String> candidates = new LinkedHashSet<>();
+        for (String fid : frontier) {
+            for (VEdge e : edges) {
+                if (e.from.equals(fid) && !fireSpread.contains(e.to) && !e.to.equals(fireNodeId))
+                    candidates.add(e.to);
+                if (e.to.equals(fid) && !fireSpread.contains(e.from) && !e.from.equals(fireNodeId))
+                    candidates.add(e.from);
             }
         }
-
-        for (Passage passage : controller.getGraph().getPassages()) {
-            javafx.geometry.Point2D passagePos = getPositionForElement(passage);
-
-            if (passagePos == null) {
-                continue;
-            }
-
-            for (Door door : passage.getConnectedDoors()) {
-                Room room = door.getRoom();
-
-                if (room == null || isInternalPassageConnector(room)) {
-                    continue;
-                }
-
-                javafx.geometry.Point2D roomPos = getPositionForElement(room);
-
-                if (distanceToSegment(click, roomPos, passagePos) <= 13.0) {
-                    return door;
-                }
-            }
+        if (!candidates.isEmpty()) {
+            String[] arr = candidates.toArray(new String[0]);
+            String picked = arr[(int)(Math.random() * arr.length)];
+            fireSpread.add(picked);
         }
-
-        return null;
+        updateFireStatus();
     }
 
-    /**
-     * Computes the shortest distance from a point to a segment.
-     *
-     * @param point tested point
-     * @param start segment start
-     * @param end segment end
-     * @return distance to the segment
-     */
-    private double distanceToSegment(
-            javafx.geometry.Point2D point,
-            javafx.geometry.Point2D start,
-            javafx.geometry.Point2D end
-    ) {
-        if (point == null || start == null || end == null) {
-            return Double.MAX_VALUE;
-        }
-
-        double dx = end.getX() - start.getX();
-        double dy = end.getY() - start.getY();
-        double lengthSquared = dx * dx + dy * dy;
-
-        if (lengthSquared == 0.0) {
-            return point.distance(start);
-        }
-
-        double t = ((point.getX() - start.getX()) * dx + (point.getY() - start.getY()) * dy)
-            / lengthSquared;
-        t = Math.max(0.0, Math.min(1.0, t));
-
-        javafx.geometry.Point2D projection = new javafx.geometry.Point2D(
-            start.getX() + t * dx,
-            start.getY() + t * dy
-        );
-
-        return point.distance(projection);
+    private void resetFire() {
+        if (fireTimer != null) { fireTimer.stop(); fireTimer = null; }
+        fireNodeId = null; fireSpread.clear();
+        updateFireStatus();
+        controller.reset();
     }
 
-    /**
-     * Returns a readable label for a corridor segment.
-     *
-     * @param door corridor segment
-     * @return human-readable segment label
-     */
-    private String edgeLabel(Door door) {
-        if (door == null || door.getRoom() == null || door.getPassage() == null) {
-            return "—";
-        }
-
-        if (isInternalPassageConnector(door.getRoom())) {
-            List<Door> doors = door.getRoom().getDoors();
-            if (doors.size() >= 2) {
-                return shortName(doors.get(0).getPassage().getName())
-                    + " ↔ "
-                    + shortName(doors.get(1).getPassage().getName());
-            }
-        }
-
-        return shortName(door.getRoom().getName()) + " ↔ " + shortName(door.getPassage().getName());
-    }
-
-    /**
-     * Checks whether a room is only an internal connector used to link two real
-     * passages. Such connectors must not be visible as extra junction dots.
-     *
-     * @param room inspected room
-     * @return true if the room is an internal passage connector
-     */
-    private boolean isInternalPassageConnector(Room room) {
-        return room != null
-            && room.getName() != null
-            && room.getName().contains("↔")
-            && room.getDoors() != null
-            && room.getDoors().size() >= 2;
-    }
-
-    private void updateStatsPanel() {
-        if (selectedDoor != null) {
-            statNameLbl.setText("Couloir: " + edgeLabel(selectedDoor));
-            statOccLbl.setText("Occupation: " + visualOccupancyOfDoor(selectedDoor)
-                + " / " + selectedDoor.getMaxCapacity());
-            statPassedLbl.setText("Agents passés: " + selectedDoor.getTotalAgentsPassed());
-            statSpeedLbl.setText(String.format("Vitesse moy.: %.2f", selectedDoor.getAverageSpeed()));
-            statStatusLbl.setText(String.format(
-                "Densité: %.0f%%",
-                densityRatioOfDoor(selectedDoor) * 100.0
-            ));
-        } else if (selectedNode != null) {
-            statNameLbl.setText(selectedNode.getName());
-            if (selectedNode instanceof Exit) {
-                statOccLbl.setText("Sortie: capacité non affichée");
-            } else {
-                statOccLbl.setText("Occupation: " + selectedNode.getCurrentOccupancy()
-                    + " / " + selectedNode.getMaxCapacity());
-            }
-            statPassedLbl.setText("Agents passés: " + selectedNode.getTotalAgentsPassed());
-            statSpeedLbl.setText(String.format("Vitesse moy.: %.2f", selectedNode.getAverageSpeed()));
-            statStatusLbl.setText(String.format(
-                "Statut: %s · Densité: %.0f%%",
-                selectedNode.getStatus(),
-                densityRatioWithMovingAgents(selectedNode) * 100.0
-            ));
-        } else if (selectedAgent != null) {
-            statNameLbl.setText(selectedAgent.getName());
-            statOccLbl.setText("État: " + selectedAgent.getState());
-            int remaining = selectedAgent.getPath() == null ? 0
-                : Math.max(0, selectedAgent.getPath().size() - selectedAgent.getPathIndex() - 1);
-            statPassedLbl.setText("Étapes restantes: " + remaining);
-            statSpeedLbl.setText(String.format("Vitesse: %.1f", selectedAgent.getMaxSpeed()));
-            statStatusLbl.setText("Comportement: " + selectedAgent.getBehavior());
+    private void updateFireStatus() {
+        if (fireNodeId == null) {
+            fireStatusLbl.setText("Aucun feu détecté");
+            fireStatusLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
         } else {
-            statNameLbl.setText("—");
-            statOccLbl.setText("Occupation: —");
-            statPassedLbl.setText("Agents passés: —");
-            statSpeedLbl.setText("Vitesse moy.: —");
-            statStatusLbl.setText("Statut: —");
+            VNode fn = byId(fireNodeId);
+            fireStatusLbl.setText("🔥 " + (fn != null ? fn.label : "?")
+                + " — " + fireSpread.size() + " zone(s)");
+            fireStatusLbl.setStyle("-fx-font-size:11px;-fx-text-fill:#dc2626;");
         }
     }
 
-    // ── Agent position ────────────────────────────────────
+    // ── Node deletion ─────────────────────────────────────
 
-    private javafx.geometry.Point2D agentPos(Agent a) {
-        if (a.getCurrentLocation() == null) return null;
+    private void deleteNode(String id) {
+        nodes.removeIf(n -> n.id.equals(id));
+        edges.removeIf(e -> e.from.equals(id) || e.to.equals(id));
+        if (id.equals(fireNodeId)) { fireNodeId = null; fireSpread.clear(); }
+        fireSpread.remove(id);
+        if (id.equals(selectedId)) selectedId = null;
+    }
 
-        javafx.geometry.Point2D base = getPositionForElement(a.getCurrentLocation());
-        if (base == null) return null;
+    // ── Info panel ────────────────────────────────────────
 
-        BuildingElement next = a.getNextInPath();
+    private void showNodeInfo(String id) {
+        VNode n = byId(id);
+        if (n == null) { clearInfoPanel(); return; }
 
-        if (next != null && a.getProgress() > 0) {
-            javafx.geometry.Point2D np = getPositionForElement(next);
+        infoPanelBox.getChildren().clear();
 
-            if (np != null) {
-                double t = a.getProgress();
+        Label typeLbl = new Label(n.type.name() + " — " +
+            (n.floor < FLOOR_NAME.length ? FLOOR_NAME[n.floor] : "Étage " + n.floor));
+        typeLbl.setStyle("-fx-font-size:11px;-fx-font-weight:bold;-fx-text-fill:#334155;");
+        infoPanelBox.getChildren().add(typeLbl);
 
-                return new javafx.geometry.Point2D(
-                    base.getX() + (np.getX() - base.getX()) * t,
-                    base.getY() + (np.getY() - base.getY()) * t
-                );
-            }
+        // Name
+        infoPanelBox.getChildren().add(propRow("Nom", n.label, val -> {
+            n.label = val; }));
+
+        // Floor
+        ComboBox<String> flCombo = new ComboBox<>();
+        for (String fn : FLOOR_NAME) flCombo.getItems().add(fn);
+        flCombo.getSelectionModel().select(Math.min(n.floor, FLOOR_NAME.length-1));
+        flCombo.setStyle("-fx-font-size:11px;");
+        flCombo.setOnAction(e -> n.floor = flCombo.getSelectionModel().getSelectedIndex());
+        infoPanelBox.getChildren().add(labeledControl("Étage", flCombo));
+
+        // Capacity
+        if (n.type == NType.ROOM || n.type == NType.HALL) {
+            infoPanelBox.getChildren().add(intRow("Capacité (pers)", n.cap, val -> n.cap = val));
+        }
+        // Rate
+        if (n.type == NType.DOOR || n.type == NType.STAIR) {
+            infoPanelBox.getChildren().add(dblRow("Débit (pers/s)", n.rate, val -> n.rate = val));
         }
 
-        int h = Math.abs(a.getId().hashCode());
-
-        return new javafx.geometry.Point2D(
-            base.getX() + (h % 18) - 9,
-            base.getY() + ((h / 18) % 14) - 7
-        );
+        // Delete
+        Button del = sBtn("✕ Supprimer", "#ef4444");
+        del.setOnAction(e -> { deleteNode(id); clearInfoPanel(); });
+        infoPanelBox.getChildren().add(del);
     }
 
-    /**
-     * Returns the color of a large node according to its density.
-     *
-     * @param el element to color
-     * @return node color
-     */
-    private Color nodeColor(BuildingElement el) {
-        if (el.isBlocked()) return Color.web("#424242");
-        if (el instanceof Exit) return Color.web("#0d47a1");
-        return densityColorFromRatio(densityRatioWithMovingAgents(el));
+    private HBox propRow(String label, String value, java.util.function.Consumer<String> setter) {
+        Label lbl = new Label(label); lbl.setMinWidth(80);
+        lbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        TextField tf = new TextField(value); tf.setPrefWidth(110);
+        tf.setStyle("-fx-font-size:11px;");
+        tf.setOnAction(e -> setter.accept(tf.getText()));
+        tf.focusedProperty().addListener((o, ov, nv) -> { if (!nv) setter.accept(tf.getText()); });
+        return new HBox(6, lbl, tf);
     }
 
-    // ── Context menu ──────────────────────────────────────
-
-    /**
-     * Creates the right-click menu and makes it disappear when the user clicks elsewhere.
-     */
-    private void setupContextMenu() {
-        graphContextMenu = new ContextMenu();
-        MenuItem addN = new MenuItem("Ajouter un nœud");
-        MenuItem rmN  = new MenuItem("Supprimer un nœud");
-        MenuItem editN = new MenuItem("Modifier un nœud");
-        MenuItem moveN = new MenuItem("Déplacer un nœud");
-        MenuItem addE = new MenuItem("Ajouter une arête");
-        MenuItem editE = new MenuItem("Modifier une arête");
-        MenuItem rmE  = new MenuItem("Supprimer une arête");
-        MenuItem rndN = new MenuItem("X nœuds aléatoires");
-        graphContextMenu.getItems().addAll(addN, editN, rmN, moveN,
-            new SeparatorMenuItem(), addE, editE, rmE, new SeparatorMenuItem(), rndN);
-        addN.setOnAction(e -> handleAddNode());
-        editN.setOnAction(e -> handleEditNode());
-        rmN.setOnAction(e  -> handleRemoveNode());
-        moveN.setOnAction(e -> handleMoveNode());
-        addE.setOnAction(e -> handleAddEdge());
-        editE.setOnAction(e -> handleEditEdge());
-        rmE.setOnAction(e  -> handleRemoveEdge());
-        rndN.setOnAction(e -> handleAddRandomNodes());
-        canvas.setOnContextMenuRequested(e -> {
-            if (graphContextMenu.isShowing()) {
-                graphContextMenu.hide();
-            }
-
-            graphContextMenu.show(canvas, e.getScreenX(), e.getScreenY());
-            e.consume();
-        });
+    private HBox intRow(String label, int value, java.util.function.Consumer<Integer> setter) {
+        Label lbl = new Label(label); lbl.setMinWidth(90);
+        lbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        TextField tf = new TextField(String.valueOf(value)); tf.setPrefWidth(70);
+        tf.setStyle("-fx-font-size:11px;");
+        Runnable apply = () -> {
+            try { setter.accept(Integer.parseInt(tf.getText().trim())); } catch (Exception ignored) {}
+        };
+        tf.setOnAction(e -> apply.run());
+        tf.focusedProperty().addListener((o, ov, nv) -> { if (!nv) apply.run(); });
+        return new HBox(6, lbl, tf);
     }
 
-    // ── Handlers ──────────────────────────────────────────
-
-    private void handleAddNode() {
-        double[] freePos = generateFreeNodePosition();
-
-        TextField nameF = new TextField();
-        TextField xF = new TextField(String.valueOf((int) freePos[0]));
-        TextField yF = new TextField(String.valueOf((int) freePos[1]));
-        ComboBox<String> typeB = new ComboBox<>();
-        typeB.getItems().addAll("Bureau", "Amphi", "Salle", "Sortie"); typeB.getSelectionModel().selectFirst();
-        dialog("Ajouter un nœud", grid("Nom:", nameF, "Type:", typeB, "X:", xF, "Y:", yF), () -> {
-            try {
-                String n = nameF.getText().trim();
-                if (n.isEmpty()) { showErr("Nom vide"); return; }
-                double x = Double.parseDouble(xF.getText()), y = Double.parseDouble(yF.getText());
-                if (isTooCloseToExistingViewNode(x, y)) {
-                    showErr("Impossible de créer ce nœud : il est trop proche d’un autre nœud.");
-                    return;
-                }
-                controller.addNode(n, typeB.getValue(), x, y);
-                pos.put(n, new javafx.geometry.Point2D(x, y));
-                draw();
-            } catch (Exception ex) { showErr("Invalide"); }
-        });
+    private HBox dblRow(String label, double value, java.util.function.Consumer<Double> setter) {
+        Label lbl = new Label(label); lbl.setMinWidth(90);
+        lbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        TextField tf = new TextField(String.format("%.1f", value)); tf.setPrefWidth(70);
+        tf.setStyle("-fx-font-size:11px;");
+        Runnable apply = () -> {
+            try { setter.accept(Double.parseDouble(tf.getText().trim())); } catch (Exception ignored) {}
+        };
+        tf.setOnAction(e -> apply.run());
+        tf.focusedProperty().addListener((o, ov, nv) -> { if (!nv) apply.run(); });
+        return new HBox(6, lbl, tf);
     }
 
-    private void handleEditNode() {
-        ComboBox<String> nb = nodeCombo();
-        TextField nameF = new TextField(), capF = new TextField();
-        dialog("Modifier un nœud", grid("Nœud:", nb, "Nouveau nom:", nameF, "Capacité:", capF), () -> {
-            try {
-                String old = nb.getValue(), newN = nameF.getText().trim();
-                if (old == null || newN.isEmpty()) { showErr("Invalide"); return; }
-                int cap = Integer.parseInt(capF.getText());
-                javafx.geometry.Point2D p = pos.remove(old);
-                controller.updateNode(old, newN, cap);
-                if (p != null) pos.put(newN, p);
-                draw();
-            } catch (Exception ex) { showErr("Invalide"); }
-        });
+    private HBox labeledControl(String label, javafx.scene.Node ctrl) {
+        Label lbl = new Label(label); lbl.setMinWidth(80);
+        lbl.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        return new HBox(6, lbl, ctrl);
     }
 
-    private void handleRemoveNode() {
-        ComboBox<String> nb = nodeCombo();
-        dialog("Supprimer un nœud", grid("Nœud:", nb), () -> {
-            if (nb.getValue() != null) {
-                controller.removeNode(nb.getValue());
-                pos.remove(nb.getValue());
-                selectedNode = null; selectedDoor = null; draw();
-            }
-        });
+    private void clearInfoPanel() {
+        infoPanelBox.getChildren().clear();
+        Label hint = new Label("Cliquez sur un élément");
+        hint.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
+        infoPanelBox.getChildren().add(hint);
     }
 
-    private void handleMoveNode() {
-        ComboBox<String> nb = new ComboBox<>();
-        pos.keySet().stream().filter(k -> !k.contains("↔")).forEach(nb.getItems()::add);
-        nb.getSelectionModel().selectFirst();
-        TextField xF = new TextField(), yF = new TextField();
-        dialog("Déplacer un nœud", grid("Nœud:", nb, "X:", xF, "Y:", yF), () -> {
-            try {
-                pos.put(nb.getValue(),
-                    new javafx.geometry.Point2D(Double.parseDouble(xF.getText()),
-                        Double.parseDouble(yF.getText())));
-                draw();
-            } catch (Exception ex) { showErr("Coordonnées invalides"); }
-        });
+    private void showInfo(String msg) {
+        infoPanelBox.getChildren().clear();
+        Label l = new Label(msg);
+        l.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
+        l.setWrapText(true);
+        infoPanelBox.getChildren().add(l);
     }
 
-    /**
-     * Opens a dialog to edit a corridor segment. The capacity belongs to the
-     * selected edge/corridor, not to the exit node.
-     */
-    private void handleEditEdge() {
-        ComboBox<String> edgeB = new ComboBox<>();
-        Map<String, Door> doorByLabel = new HashMap<>();
-        int index = 1;
-
-        for (Passage passage : controller.getGraph().getPassages()) {
-            for (Door door : passage.getConnectedDoors()) {
-                String label = index + ". " + edgeLabel(door);
-                doorByLabel.put(label, door);
-                edgeB.getItems().add(label);
-                index++;
-            }
-        }
-
-        edgeB.getSelectionModel().selectFirst();
-
-        TextField capacityF = new TextField();
-
-        edgeB.setOnAction(e -> {
-            Door selected = doorByLabel.get(edgeB.getValue());
-
-            if (selected != null) {
-                capacityF.setText(String.valueOf(selected.getMaxCapacity()));
-            }
-        });
-
-        if (!edgeB.getItems().isEmpty()) {
-            edgeB.fireEvent(new javafx.event.ActionEvent());
-        }
-
-        dialog("Modifier une arête / couloir",
-            grid("Couloir:", edgeB, "Capacité max:", capacityF), () -> {
-            try {
-                Door selected = doorByLabel.get(edgeB.getValue());
-
-                if (selected == null) {
-                    showErr("Aucun couloir sélectionné");
-                    return;
-                }
-
-                int capacity = Integer.parseInt(capacityF.getText().trim());
-                selected.setMaxCapacity(capacity);
-                log("Couloir modifié: " + edgeLabel(selected));
-                draw();
-            } catch (NumberFormatException ex) {
-                showErr("La capacité doit être un entier valide.");
-            } catch (IllegalArgumentException ex) {
-                showErr(ex.getMessage());
-            }
-        });
-    }
-
-    private void handleAddEdge() {
-        ComboBox<String> spaceB = new ComboBox<>();
-        ComboBox<String> passageB = new ComboBox<>();
-
-        controller.getGraph().getElements().forEach(el -> {
-            if (el.getName().contains("↔")) return;
-
-            if (el instanceof Passage) {
-                passageB.getItems().add(el.getName());
-            } else {
-                spaceB.getItems().add(el.getName());
-            }
-        });
-
-        spaceB.getSelectionModel().selectFirst();
-        passageB.getSelectionModel().selectFirst();
-
-        dialog("Ajouter une arête",
-            grid("Espace / sortie:", spaceB, "Jonction / palier:", passageB), () -> {
-                if (spaceB.getValue() == null || passageB.getValue() == null) {
-                    showErr("Sélection invalide");
-                    return;
-                }
-
-                controller.addConnection(spaceB.getValue(), passageB.getValue());
-                draw();
-            });
-    }
-    private void handleRemoveEdge() {
-        ComboBox<String> edgeB = new ComboBox<>();
-
-        for (Passage passage : controller.getGraph().getPassages()) {
-            for (Door door : passage.getConnectedDoors()) {
-                Room room = door.getRoom();
-
-                if (room == null) continue;
-
-                if (room.getName().contains("↔")) {
-                    String[] parts = room.getName().split("↔");
-
-                    if (parts.length == 2) {
-                        String label = parts[0] + " → " + parts[1];
-
-                        if (!edgeB.getItems().contains(label)) {
-                            edgeB.getItems().add(label);
-                        }
-                    }
-                } else {
-                    String label = room.getName() + " → " + passage.getName();
-
-                    if (!edgeB.getItems().contains(label)) {
-                        edgeB.getItems().add(label);
-                    }
-                }
-            }
-        }
-
-        edgeB.getSelectionModel().selectFirst();
-
-        dialog("Supprimer une arête", grid("Arête:", edgeB), () -> {
-            if (edgeB.getValue() == null) {
-                showErr("Aucune arête sélectionnée");
-                return;
-            }
-
-            String[] parts = edgeB.getValue().split(" → ");
-
-            if (parts.length != 2) {
-                showErr("Arête invalide");
-                return;
-            }
-
-            controller.removeEdge(parts[0], parts[1]);
-            draw();
-        });
-    }
-
-    private void handleAddRandomNodes() {
-        TextField countF = new TextField("5");
-
-        dialog("Nœuds aléatoires", grid("Nombre:", countF), () -> {
-            try {
-                controller.addRandomNodes(Integer.parseInt(countF.getText().trim()));
-
-                controller.getGraph().getElements().forEach(el -> {
-                    if (!el.getName().contains("↔")
-                            && !pos.containsKey(el.getName())
-                            && (el.getX() != 0.0 || el.getY() != 0.0)) {
-
-                        pos.put(el.getName(),
-                            new javafx.geometry.Point2D(el.getX(), el.getY()));
-                    }
-                });
-
-                draw();
-            } catch (Exception ex) {
-                showErr("Nombre invalide");
-            }
-        });
-    }
-
-    private void handleEditAgent() {
-        ComboBox<String> agB = agentCombo();
-        TextField nameF = new TextField(), speedF = new TextField(), tolF = new TextField();
-        ComboBox<String> locB = nodeCombo();
-        ComboBox<Behavior> behB = new ComboBox<>();
-        behB.getItems().addAll(Behavior.values()); behB.getSelectionModel().selectFirst();
-
-        // Pre-fill fields when agent selected
-        agB.setOnAction(e -> {
-            controller.getGraph().getAgents().stream()
-                .filter(a -> a.getName().equals(agB.getValue()))
-                .findFirst().ifPresent(a -> {
-                    nameF.setText(a.getName());
-                    speedF.setText(String.valueOf(a.getMaxSpeed()));
-                    tolF.setText(String.valueOf(a.getDensityTolerance()));
-                    locB.setValue(a.getCurrentLocation().getName());
-                    behB.setValue(a.getBehavior());
-                });
-        });
-        // Trigger pre-fill for first item
-        if (!agB.getItems().isEmpty()) agB.fireEvent(
-            new javafx.event.ActionEvent());
-
-        dialog("Modifier un agent",
-            grid("Agent:", agB, "Nouveau nom:", nameF, "Position:", locB,
-                "Vitesse:", speedF, "Tolérance:", tolF, "Comportement:", behB), () -> {
-            try {
-                controller.updateAgent(agB.getValue(), nameF.getText().trim(),
-                    locB.getValue(), Double.parseDouble(speedF.getText()),
-                    behB.getValue(), Double.parseDouble(tolF.getText()));
-                log("Agent modifié: " + nameF.getText().trim());
-                draw();
-            } catch (Exception ex) { showErr("Valeurs invalides"); }
-        });
-    }
-
-    private void handleAddAgent() {
-        TextField nameF = new TextField(), speedF = new TextField("1.0"), tolF = new TextField("0.7");
-        ComboBox<String> locB = nodeCombo();
-        ComboBox<Behavior> behB = new ComboBox<>();
-        behB.getItems().addAll(Behavior.values()); behB.getSelectionModel().selectFirst();
-        dialog("Ajouter un agent",
-            grid("Nom:", nameF, "Position:", locB, "Vitesse:", speedF,
-                "Tolérance:", tolF, "Comportement:", behB), () -> {
-            try {
-                controller.addPersonAgent(nameF.getText().trim(), locB.getValue(),
-                    Double.parseDouble(speedF.getText()), behB.getValue(),
-                    Double.parseDouble(tolF.getText()));
-                log("Agent ajouté: " + nameF.getText().trim());
-            } catch (Exception ex) { showErr("Valeurs invalides"); }
-        });
-    }
-
-    private void handleRemoveAgent() {
-        ComboBox<String> agB = agentCombo();
-        dialog("Supprimer un agent", grid("Agent:", agB), () -> {
-            if (agB.getValue() != null) {
-                controller.removeAgent(agB.getValue());
-                if (selectedAgent != null && selectedAgent.getName().equals(agB.getValue()))
-                    selectedAgent = null;
-                log("Agent supprimé: " + agB.getValue());
-            }
-        });
-    }
-
-    private void handleRandomAgents() {
-        TextField countF = new TextField("10"), minSF = new TextField("0.5"),
-            maxSF = new TextField("1.5"), minTF = new TextField("0.3"), maxTF = new TextField("1.0");
-        dialog("Agents aléatoires",
-            grid("Nombre:", countF, "Vitesse min:", minSF, "Vitesse max:", maxSF,
-                "Tolérance min:", minTF, "Tolérance max:", maxTF), () -> {
-            try {
-                int n = Integer.parseInt(countF.getText());
-                controller.addRandomAgents(n,
-                    Double.parseDouble(minSF.getText()), Double.parseDouble(maxSF.getText()),
-                    Double.parseDouble(minTF.getText()), Double.parseDouble(maxTF.getText()));
-                log(n + " agents aléatoires ajoutés");
-            } catch (Exception ex) { showErr("Valeurs invalides"); }
-        });
-    }
+    // ── Save / Load ───────────────────────────────────────
 
     private void handleSave() {
         FileChooser fc = new FileChooser();
         fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("*.bin", "*.bin"));
         File f = fc.showSaveDialog(stage);
-        if (f != null) { controller.saveSimulation(f.getAbsolutePath()); log("Sauvegardé"); }
+        if (f != null) controller.saveSimulation(f.getAbsolutePath());
     }
 
     private void handleLoad() {
         FileChooser fc = new FileChooser();
         fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("*.bin", "*.bin"));
         File f = fc.showOpenDialog(stage);
-        if (f != null) { controller.loadSimulation(f.getAbsolutePath()); log("Chargé"); draw(); }
+        if (f != null) controller.loadSimulation(f.getAbsolutePath());
     }
 
     private void goBack() {
-        if (uiRefresh != null) uiRefresh.stop();
+        if (renderLoop != null) renderLoop.stop();
+        if (fireTimer  != null) fireTimer.stop();
         controller.pause();
         new LoginView(stage, controller).show();
     }
 
+    // ── Helpers ───────────────────────────────────────────
 
+    private List<VNode> visibleNodes() {
+        if (currentFloor == -1) return new ArrayList<>(nodes);
+        List<VNode> out = new ArrayList<>();
+        for (VNode n : nodes) if (n.floor == currentFloor) out.add(n);
+        return out;
+    }
 
-    public void refreshAfterReset() {
-        pos.clear();
-        initPositions();
+    private VNode byId(String id) {
+        if (id == null) return null;
+        for (VNode n : nodes) if (n.id.equals(id)) return n;
+        return null;
+    }
 
-        selectedNode = null;
-        selectedAgent = null;
-
-        statusLbl.setText("NORMAL");
-        statusLbl.setStyle("-fx-background-color:#2e7d32;-fx-text-fill:white;" +
-            "-fx-padding:3 10;-fx-background-radius:5;-fx-font-weight:bold;");
-
-        if (playPauseBtn != null) {
-            playPauseBtn.setText("▶ Play");
+    /** Hit-test: returns the topmost node under (mx,my). */
+    private VNode hitNode(double mx, double my) {
+        List<VNode> vis = visibleNodes();
+        Collections.reverse(vis); // topmost drawn last
+        for (VNode n : vis) {
+            double r = switch (n.type) {
+                case ROOM  -> 36;
+                case HALL  -> 28;
+                case STAIR -> 26;
+                case DOOR  -> 12;
+                case EXIT  -> 24;
+            };
+            if (Math.hypot(mx - n.x, my - n.y) <= r) return n;
         }
-
-        draw();
+        return null;
     }
 
-    private double[] generateFreeNodePosition() {
-        double x = 0;
-        double y = 0;
+    // ── Style helpers ─────────────────────────────────────
 
-        for (int attempts = 0; attempts < 300; attempts++) {
-            x = 100 + Math.random() * 620;
-            y = 80 + Math.random() * 360;
-
-            if (!isTooCloseToExistingViewNode(x, y)) {
-                return new double[]{x, y};
-            }
-        }
-
-        int count = pos.size();
-        x = 120 + (count * 90) % 620;
-        y = 90 + ((count * 90) / 620) * 90;
-
-        return new double[]{x, y};
-    }
-
-    private boolean isTooCloseToExistingViewNode(double x, double y) {
-        for (javafx.geometry.Point2D p : pos.values()) {
-            double dx = p.getX() - x;
-            double dy = p.getY() - y;
-
-            if (Math.sqrt(dx * dx + dy * dy) < 110) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // ── UI helpers ────────────────────────────────────────
-
-    private void log(String msg) {
-        if (logArea != null) {
-            logArea.appendText(msg + "\n");
-            logArea.setScrollTop(Double.MAX_VALUE);
-        }
-    }
-
-    private void initPositions() {
-        put("Réserve", 110, 80);
-        put("Bureau 1", 110, 175);
-        put("Bureau 2", 110, 270);
-        put("Bureau 3", 110, 365);
-
-        put("Palier Esc. 1", 250, 80);
-        put("Jonction Nord", 360, 170);
-        put("Palier Esc. 2", 420, 245);
-
-        put("LT Serveurs", 510, 100);
-        put("Jonction Centrale", 510, 340);
-
-        put("Sortie Ouest", 80, 440);
-        put("Amphithéâtre", 230, 440);
-        put("Jonction Sud", 410, 440);
-        put("Logement", 570, 440);
-
-        put("Sortie Est 1", 660, 220);
-        put("Sortie Est 2", 660, 340);
-        put("Sortie Est 3", 660, 430);
-    }
-
-    private void put(String n, double x, double y) {
-        pos.putIfAbsent(n, new javafx.geometry.Point2D(x, y));
-    }
-
-    private Button btn(String text, String color) {
+    private Button sBtn(String text, String color) {
         Button b = new Button(text);
         b.setStyle("-fx-background-color:" + color + ";-fx-text-fill:white;" +
-            "-fx-font-size:11px;-fx-padding:5 10;-fx-background-radius:5;-fx-cursor:hand;");
+                   "-fx-font-size:11px;-fx-padding:4 10;-fx-background-radius:5;-fx-cursor:hand;");
         return b;
     }
 
-    private Label sectionLbl(String text) {
-        Label l = new Label(text);
-        l.setFont(Font.font("Sans", FontWeight.BOLD, 12));
-        l.setTextFill(Color.web("#1a237e"));
-        return l;
+    private String defaultBtnStyle() {
+        return "-fx-background-color:white;-fx-text-fill:#334155;" +
+               "-fx-font-size:11px;-fx-padding:4 8;" +
+               "-fx-border-color:#cbd5e1;-fx-border-radius:5;-fx-background-radius:5;" +
+               "-fx-cursor:hand;";
     }
 
-    private Label infoLbl(String text) {
-        Label l = new Label(text);
-        l.setStyle("-fx-font-size:11px;-fx-text-fill:#546e7a;");
-        return l;
+    private String activeBtnStyle() {
+        return "-fx-background-color:#dbeafe;-fx-text-fill:#1d4ed8;" +
+               "-fx-font-size:11px;-fx-padding:4 8;" +
+               "-fx-border-color:#3b82f6;-fx-border-radius:5;-fx-background-radius:5;" +
+               "-fx-cursor:hand;";
     }
 
-    private HBox legendRow(Color c, String text) {
-        Label dot = new Label("●"); dot.setTextFill(c);
-        Label lbl = new Label(text); lbl.setStyle("-fx-font-size:10px;");
-        return new HBox(6, dot, lbl);
-    }
-
-    private Background bg(String hex) {
-        return new Background(new BackgroundFill(Color.web(hex),
-            CornerRadii.EMPTY, Insets.EMPTY));
-    }
-
-    private ComboBox<String> nodeCombo() {
-        ComboBox<String> b = new ComboBox<>();
-        controller.getGraph().getElements().stream()
-            .filter(el -> !el.getName().contains("↔"))
-            .forEach(el -> b.getItems().add(el.getName()));
-        b.getSelectionModel().selectFirst();
-        return b;
-    }
-
-    private ComboBox<String> agentCombo() {
-        ComboBox<String> b = new ComboBox<>();
-        controller.getGraph().getAgents().forEach(a -> b.getItems().add(a.getName()));
-        b.getSelectionModel().selectFirst();
-        return b;
-    }
-
-    private void dialog(String title, GridPane content, Runnable onOk) {
-        Dialog<ButtonType> d = new Dialog<>();
-        d.setTitle(title);
-        d.getDialogPane().setContent(content);
-        d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        d.showAndWait().ifPresent(btn -> { if (btn == ButtonType.OK) onOk.run(); });
-    }
-
-    private GridPane grid(Object... pairs) {
-        GridPane g = new GridPane();
-        g.setHgap(10); g.setVgap(8); g.setPadding(new Insets(10));
-        for (int i = 0; i < pairs.length; i += 2) {
-            g.add(new Label(pairs[i].toString()), 0, i / 2);
-            g.add((javafx.scene.Node) pairs[i + 1], 1, i / 2);
-        }
-        return g;
-    }
-
-    private void showErr(String msg) {
-        new Alert(Alert.AlertType.ERROR, msg, ButtonType.OK).showAndWait();
-    }
 }
