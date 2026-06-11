@@ -123,6 +123,18 @@ public class AdminView {
     // UI labels
     private Label fireStatusLbl;
     private VBox  infoPanelBox;
+
+    private VBox statsPanel;
+
+    private Label statNameLbl;
+    private Label statTypeLbl;
+    private Label statFloorLbl;
+    private Label statOccupationLbl;
+    private Label statPassedLbl;
+    private Label statSpeedLbl;
+    private Label statLinksLbl;
+    private Label statStatusLbl;
+
     private Button playPauseBtn;
     private TextArea logArea;
     private boolean useFastestPath = false;
@@ -549,6 +561,49 @@ public class AdminView {
         panel.getChildren().add(floorBtnRow);
         fAll.fire();
 
+
+        // ── Sélection / statistiques ─────────────────────────
+        panel.getChildren().add(new Separator());
+        panel.getChildren().add(sSection("Sélection"));
+
+        statNameLbl = new Label("Aucun élément sélectionné");
+        statNameLbl.setFont(Font.font("Sans", FontWeight.BOLD, 12));
+        statNameLbl.setStyle("-fx-text-fill:#334155;");
+
+        statTypeLbl       = statLbl("Type : —");
+        statFloorLbl      = statLbl("Étage : —");
+        statOccupationLbl = statLbl("Occupation : —");
+        statPassedLbl     = statLbl("Agents passés : —");
+        statSpeedLbl      = statLbl("Vitesse moy. : —");
+        statLinksLbl      = statLbl("Connexions : —");
+        statStatusLbl     = statLbl("Statut : —");
+
+        statsPanel = new VBox(
+            4,
+            statNameLbl,
+            statTypeLbl,
+            statFloorLbl,
+            statOccupationLbl,
+            statPassedLbl,
+            statSpeedLbl,
+            statLinksLbl,
+            statStatusLbl
+        );
+
+        statsPanel.setPadding(new Insets(8));
+        statsPanel.setStyle(
+            "-fx-background-color:white;" +
+            "-fx-border-color:#e0e0e0;" +
+            "-fx-border-radius:6;" +
+            "-fx-background-radius:6;"
+        );
+
+        panel.getChildren().add(statsPanel);
+
+
+
+
+
         // ── Propriétés ───────────────────────────────────────
         panel.getChildren().add(new Separator());
         panel.getChildren().add(sSection("Propriétés"));
@@ -600,6 +655,14 @@ public class AdminView {
         Label l = new Label(text);
         l.setStyle("-fx-font-size:10px;-fx-font-weight:bold;-fx-text-fill:#94a3b8;" +
                    "-fx-padding:8 10 4 10;-fx-text-transform:uppercase;");
+        return l;
+    }
+
+
+    private Label statLbl(String text) {
+        Label l = new Label(text);
+        l.setStyle("-fx-font-size:11px;-fx-text-fill:#64748b;");
+        l.setWrapText(true);
         return l;
     }
 
@@ -820,6 +883,7 @@ public class AdminView {
         }
 
         gc.restore();
+        updateSelectionStatsPanel();
     }
 
     private String fitText(String value, Font font, double maxWidth) {
@@ -1371,6 +1435,7 @@ public class AdminView {
         Label hint = new Label("Cliquez sur un élément");
         hint.setStyle("-fx-font-size:11px;-fx-text-fill:#94a3b8;");
         infoPanelBox.getChildren().add(hint);
+        updateSelectionStatsPanel();
     }
 
     private void showInfo(String msg) {
@@ -1585,6 +1650,125 @@ public class AdminView {
             logArea.appendText(msg + "\n");
             logArea.setScrollTop(Double.MAX_VALUE);
         }
+    }
+
+
+    private void updateSelectionStatsPanel() {
+        if (statsPanel == null || statNameLbl == null) return;
+
+        VNode n = byId(selectedId);
+
+        if (n == null) {
+            statNameLbl.setText("Aucun élément sélectionné");
+            statTypeLbl.setText("Type : —");
+            statFloorLbl.setText("Étage : —");
+            statOccupationLbl.setText("Occupation : —");
+            statPassedLbl.setText("Agents passés : —");
+            statSpeedLbl.setText("Vitesse moy. : —");
+            statLinksLbl.setText("Connexions : —");
+            statStatusLbl.setText("Statut : —");
+            return;
+        }
+
+        BuildingElement modelElement = findModelElementByName(n.label);
+
+        statNameLbl.setText(n.label);
+        statTypeLbl.setText("Type : " + typeName(n.type));
+        statFloorLbl.setText("Étage : " + floorName(n.floor));
+        statLinksLbl.setText("Connexions : " + connectionCount(n.id));
+
+        if (modelElement != null) {
+            int max = modelElement.getMaxCapacity();
+            int occ = modelElement.getCurrentOccupancy();
+
+            if (n.type == NType.EXIT) {
+                statOccupationLbl.setText("Occupation : sortie");
+            } else {
+                statOccupationLbl.setText("Occupation : " + occ + " / " + max);
+            }
+
+            statPassedLbl.setText("Agents passés : " + modelElement.getTotalAgentsPassed());
+            statSpeedLbl.setText(String.format("Vitesse moy. : %.2f", modelElement.getAverageSpeed()));
+
+            double density = max <= 0 ? 0 : (occ * 100.0 / max);
+
+            statStatusLbl.setText(String.format(
+                "Statut : %s · densité %.0f%%",
+                modelElement.getStatus(),
+                density
+            ));
+
+        } else {
+            if (n.type == NType.ROOM || n.type == NType.HALL) {
+                statOccupationLbl.setText("Capacité : " + n.cap + " personnes");
+                statSpeedLbl.setText("Débit : —");
+            } else if (n.type == NType.DOOR || n.type == NType.STAIR) {
+                statOccupationLbl.setText("Capacité : —");
+                statSpeedLbl.setText(String.format("Débit : %.1f pers/s", n.rate));
+            } else if (n.type == NType.EXIT) {
+                statOccupationLbl.setText("Occupation : sortie");
+                statSpeedLbl.setText("Débit : —");
+            }
+
+            statPassedLbl.setText("Agents passés : —");
+            statStatusLbl.setText("Statut : " + visualStatus(n));
+        }
+    }
+
+    private BuildingElement findModelElementByName(String name) {
+        if (name == null || controller == null || controller.getGraph() == null) {
+            return null;
+        }
+
+        for (BuildingElement el : controller.getGraph().getElements()) {
+            if (el.getName().equalsIgnoreCase(name)) {
+                return el;
+            }
+        }
+
+        return null;
+    }
+
+    private String typeName(NType type) {
+        return switch (type) {
+            case ROOM  -> "Salle";
+            case DOOR  -> "Porte";
+            case HALL  -> "Hall";
+            case STAIR -> "Escalier";
+            case EXIT  -> "Sortie";
+        };
+    }
+
+    private String floorName(int floor) {
+        if (floor >= 0 && floor < FLOOR_NAME.length) {
+            return FLOOR_NAME[floor];
+        }
+
+        return "Étage " + floor;
+    }
+
+    private int connectionCount(String nodeId) {
+        int count = 0;
+
+        for (VEdge e : edges) {
+            if (e.from.equals(nodeId) || e.to.equals(nodeId)) {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private String visualStatus(VNode n) {
+        if (n.id.equals(fireNodeId)) {
+            return "Feu départ";
+        }
+
+        if (fireSpread.contains(n.id)) {
+            return "Touché par la propagation";
+        }
+
+        return "Normal";
     }
 
     // ── Save / Load ───────────────────────────────────────
