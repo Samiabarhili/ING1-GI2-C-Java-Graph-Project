@@ -15,12 +15,22 @@ import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+import java.util.*;
+
 /**
  * Supervisor view — mobile-style notification interface.
- * The supervisor is on the ground, not at a desk.
- * Shows only what they need: their room status + the order received.
+ *
+ * Evacuation logic (matching the design spec):
+ *   - Fire floor  : rooms closest to fire evacuate first (sequential, one at a time).
+ *   - Other floors: rooms closest to a staircase/exit evacuate first (sequential
+ *                   within the floor, but floors run in parallel with the fire floor).
+ *   - This room waits and displays a countdown until its turn; when the previous
+ *     room has finished, a "GO" message appears automatically.
  */
 public class SupervisorView {
+
+    /** Simulated seconds each room needs to evacuate (adjust for demo). */
+    private static final int SECONDS_PER_ROOM = 30;
 
     private final Stage stage;
     private final GraphController controller;
@@ -30,10 +40,18 @@ public class SupervisorView {
     private Label densityLbl;
     private Label orderBanner;
     private Label orderDetail;
-    private Button guideBtn;
     private Timeline refresh;
 
-    private boolean orderReceived = false;
+    /** True once the fire alert has been received. */
+    private boolean alertReceived = false;
+    /** True once this room's evacuation turn has started. */
+    private boolean myTurnStarted = false;
+    /** Evacuation order of this room on its floor (1 = first). */
+    private int myOrder = -1;
+    /** Total rooms to evacuate on this floor. */
+    private int totalOnFloor = -1;
+    /** Simulated tick at which this room's turn begins. */
+    private long myTurnStartTick = -1;
 
     public SupervisorView(Stage stage, GraphController controller, Room assignedRoom) {
         this.stage = stage;
@@ -42,14 +60,13 @@ public class SupervisorView {
     }
 
     public void show() {
-        // ── Top — room identity ───────────────────────────
+        // ── Header ────────────────────────────────────────
         Label roomName = new Label(assignedRoom.getName());
         roomName.setFont(Font.font("Sans", FontWeight.BOLD, 22));
         roomName.setTextFill(Color.WHITE);
 
         Label roleTag = new Label("SUPERVISEUR");
-        roleTag.setStyle("-fx-font-size:10px;-fx-text-fill:#a5d6a7;-fx-font-weight:bold;" +
-            "-fx-letter-spacing:2;");
+        roleTag.setStyle("-fx-font-size:10px;-fx-text-fill:#a5d6a7;-fx-font-weight:bold;");
 
         Button backBtn = new Button("←");
         backBtn.setStyle("-fx-background-color:transparent;-fx-text-fill:white;" +
@@ -77,7 +94,7 @@ public class SupervisorView {
         occCard.setPadding(new Insets(20));
         occCard.setAlignment(Pos.CENTER);
         occCard.setStyle("-fx-background-color:white;-fx-border-color:#e0e0e0;" +
-            "-fx-border-radius:12;-fx-background-radius:12;-fx-effect:dropshadow(gaussian,rgba(0,0,0,0.06),6,0,0,2);");
+            "-fx-border-radius:12;-fx-background-radius:12;");
 
         // ── Order banner ──────────────────────────────────
         orderBanner = new Label("En attente d'un ordre...");
@@ -98,66 +115,52 @@ public class SupervisorView {
         orderBox.setStyle("-fx-background-color:#f8f9fa;-fx-border-color:#e8eaed;" +
             "-fx-border-radius:12;-fx-background-radius:12;");
 
-        // ── Action button ─────────────────────────────────
-        guideBtn = new Button("🚶  Guider les occupants vers la sortie");
-        guideBtn.setMaxWidth(Double.MAX_VALUE);
-        guideBtn.setStyle("-fx-background-color:#e0e0e0;-fx-text-fill:#9e9e9e;" +
-            "-fx-font-size:14px;-fx-padding:14;-fx-background-radius:10;-fx-cursor:hand;");
-        guideBtn.setDisable(true);
-
-        guideBtn.setOnAction(e -> {
-            controller.getGraph().getAgents().stream()
-                .filter(a -> a.getCurrentLocation().equals(assignedRoom))
-                .forEach(a -> {
-                    a.setStrategy(new EvacuateStrategy());
-                    a.setPath(new java.util.ArrayList<>());
-                    a.setState(AgentState.CALM);
-                });
-            guideBtn.setText("✅  Guidage en cours...");
-            guideBtn.setStyle("-fx-background-color:#2e7d32;-fx-text-fill:white;" +
-                "-fx-font-size:14px;-fx-padding:14;-fx-background-radius:10;");
-            guideBtn.setDisable(true);
-        });
-
-        Button blockBtn = new Button("🚫  Bloquer la salle");
-        blockBtn.setMaxWidth(Double.MAX_VALUE);
-        blockBtn.setStyle("-fx-background-color:white;-fx-text-fill:#c62828;" +
-            "-fx-font-size:13px;-fx-padding:10;-fx-background-radius:10;" +
-            "-fx-border-color:#c62828;-fx-border-radius:10;-fx-cursor:hand;");
-        blockBtn.setOnAction(e -> {
-            assignedRoom.setStatus(BlockStatus.BLOCKED);
-            orderBanner.setText("Salle bloquée");
-            orderBanner.setStyle("-fx-text-fill:#c62828;");
-        });
 
         // ── Layout ────────────────────────────────────────
-        VBox content = new VBox(14, occCard, orderBox, guideBtn, blockBtn);
+        VBox content = new VBox(14, occCard, orderBox);
         content.setPadding(new Insets(16));
-        content.setBackground(new javafx.scene.layout.Background(new javafx.scene.layout.BackgroundFill(javafx.scene.paint.Color.WHITE, javafx.scene.layout.CornerRadii.EMPTY, javafx.geometry.Insets.EMPTY)));
+        content.setBackground(new Background(new BackgroundFill(Color.WHITE,
+            CornerRadii.EMPTY, Insets.EMPTY)));
 
         BorderPane root = new BorderPane();
         root.setTop(header);
         root.setCenter(content);
-        root.setBackground(new javafx.scene.layout.Background(new javafx.scene.layout.BackgroundFill(javafx.scene.paint.Color.WHITE, javafx.scene.layout.CornerRadii.EMPTY, javafx.geometry.Insets.EMPTY)));
+        root.setBackground(new Background(new BackgroundFill(Color.WHITE,
+            CornerRadii.EMPTY, Insets.EMPTY)));
 
-        // Mobile-like narrow window
         Scene scene = new Scene(root, 360, 580);
         stage.setTitle("SafeCampus — Superviseur");
         stage.setScene(scene);
         stage.show();
 
-        // Auto-refresh + check for evacuation orders
         refresh = new Timeline(new KeyFrame(Duration.millis(400), e -> updateUI()));
         refresh.setCycleCount(Timeline.INDEFINITE);
         refresh.play();
         updateUI();
     }
 
+    // ── Update ────────────────────────────────────────────
+
     private void updateUI() {
+        updateOccupancy();
+
+        if (!controller.getGraph().isEmergencyActive()) {
+            return;
+        }
+
+        // First time we detect alert: compute evacuation plan
+        if (!alertReceived) {
+            alertReceived = true;
+            computeMyOrder();
+        }
+
+        updateEvacStatus();
+    }
+
+    private void updateOccupancy() {
         int occ = assignedRoom.getCurrentOccupancy();
         int max = assignedRoom.getMaxCapacity();
         occupancyLbl.setText(occ + " / " + max);
-
         double ratio = max > 0 ? (double) occ / max : 0;
         if (ratio < 0.4) {
             occupancyLbl.setTextFill(Color.web("#1b5e20"));
@@ -172,25 +175,214 @@ public class SupervisorView {
             densityLbl.setText("🚨 Zone saturée !");
             densityLbl.setStyle("-fx-font-size:13px;-fx-font-weight:bold;-fx-text-fill:#b71c1c;");
         }
+    }
 
-        // Check if any agent in the room is panicked = fire alert received
-        boolean alert = controller.getGraph().getAgents().stream()
-            .anyMatch(a -> a.getCurrentLocation().equals(assignedRoom)
-                && a.getState() == AgentState.PANICKED);
+    /**
+     * Computes the evacuation order for this room using BFS distance.
+     *
+     * Fire floor  → sorted by distance to fire (ascending: closest first).
+     * Other floors → sorted by distance to nearest staircase/exit (ascending).
+     *
+     * Evacuation is sequential within each floor: room with order 1 starts
+     * immediately, room with order N starts after (N-1)*SECONDS_PER_ROOM simulated
+     * seconds from the alert tick.
+     */
+    private void computeMyOrder() {
+        Graph graph = controller.getGraph();
 
-        if (alert && !orderReceived) {
-            orderReceived = true;
-            orderBanner.setText("🔥  ÉVACUEZ LA SALLE");
-            orderBanner.setStyle("-fx-text-fill:#c62828;-fx-font-size:18px;-fx-font-weight:bold;");
-            orderDetail.setText("Guidez les occupants vers la sortie la plus proche. " +
-                "Vérifiez que la salle est vide avant de partir.");
-            orderDetail.setStyle("-fx-font-size:12px;-fx-text-fill:#424242;");
+        // Identify fire location from the first panicked agent's room
+        Room fireRoom = findFireRoom(graph);
+        int fireFloor = fireRoom != null ? fireRoom.getFloor() : -1;
 
-            // Activate the guide button
-            guideBtn.setDisable(false);
-            guideBtn.setStyle("-fx-background-color:#c62828;-fx-text-fill:white;" +
-                "-fx-font-size:14px;-fx-padding:14;-fx-background-radius:10;-fx-cursor:hand;");
+        // Collect all rooms on this floor
+        List<Room> floorRooms = new ArrayList<>();
+        for (BuildingElement el : graph.getElements()) {
+            if (el instanceof Room r && !(el instanceof Exit)
+                    && r.getFloor() == assignedRoom.getFloor()) {
+                floorRooms.add(r);
+            }
         }
+
+        // Compute BFS distances
+        Map<Room, Integer> distances = new HashMap<>();
+        if (assignedRoom.getFloor() == fireFloor && fireRoom != null) {
+            // Distance to fire
+            Map<BuildingElement, Integer> bfs = bfsFrom(fireRoom, graph);
+            for (Room r : floorRooms) {
+                distances.put(r, bfs.getOrDefault(r, 999));
+            }
+        } else {
+            // Distance to nearest staircase or exit on this floor
+            List<BuildingElement> anchors = new ArrayList<>();
+            for (BuildingElement el : graph.getElements()) {
+                if ((el instanceof Passage p && p.getType() == PassageType.STAIRCASE)
+                        || el instanceof Exit) {
+                    anchors.add(el);
+                }
+            }
+            for (Room r : floorRooms) {
+                int minDist = 999;
+                for (BuildingElement anchor : anchors) {
+                    Map<BuildingElement, Integer> bfs = bfsFrom(anchor, graph);
+                    int d = bfs.getOrDefault(r, 999);
+                    if (d < minDist) minDist = d;
+                }
+                distances.put(r, minDist);
+            }
+        }
+
+        // Sort ascending: room with smallest distance evacuates first
+        floorRooms.sort(Comparator.comparingInt(r -> distances.getOrDefault(r, 999)));
+
+        for (int i = 0; i < floorRooms.size(); i++) {
+            if (floorRooms.get(i).equals(assignedRoom)) {
+                myOrder = i + 1;
+                totalOnFloor = floorRooms.size();
+                // My turn starts after (myOrder-1) rooms have evacuated
+                myTurnStartTick = controller.getTickCount()
+                    + (long)(myOrder - 1) * SECONDS_PER_ROOM;
+                break;
+            }
+        }
+    }
+
+    private void updateEvacStatus() {
+        if (myOrder < 0) return;
+
+        long now = controller.getTickCount();
+
+        if (myOrder == 1 || now >= myTurnStartTick) {
+            // Our turn
+            if (!myTurnStarted) {
+                myTurnStarted = true;
+                activateGo();
+            }
+        } else {
+            // Still waiting
+            long ticksLeft = myTurnStartTick - now;
+            long secsLeft = Math.max(0, ticksLeft / 2); // engine default ~500ms/tick ≈ 2 ticks/s
+            String prevRoomsInfo = buildPrevRoomsText();
+            orderBanner.setText("⏳  ATTENDEZ — ordre " + myOrder + "/" + totalOnFloor);
+            orderBanner.setStyle("-fx-text-fill:#0277bd;-fx-font-size:15px;-fx-font-weight:bold;");
+            orderDetail.setText(
+                "En cours d'évacuation : " + prevRoomsInfo + "\n" +
+                "Votre tour estimé : ~" + secsLeft + "s");
+            orderDetail.setStyle("-fx-font-size:12px;-fx-text-fill:#424242;");
+        }
+    }
+
+    private void activateGo() {
+        Exit exit = findNearestExit();
+        String exitName = exit != null ? exit.getName() : "sortie de votre étage";
+
+        orderBanner.setText("✅  ÉVACUEZ MAINTENANT — ordre " + myOrder + "/" + totalOnFloor);
+        orderBanner.setStyle("-fx-text-fill:#2e7d32;-fx-font-size:16px;-fx-font-weight:bold;");
+        orderDetail.setText("Guidez les occupants vers : " + exitName +
+            "\nVérifiez que la salle est vide avant de partir.");
+        orderDetail.setStyle("-fx-font-size:12px;-fx-text-fill:#424242;");
+    }
+
+    // ── Helpers ───────────────────────────────────────────
+
+    private Room findFireRoom(Graph graph) {
+        for (Agent a : graph.getAgents()) {
+            if (a.getState() == AgentState.PANICKED
+                    && a.getCurrentLocation() instanceof Room r
+                    && !(a.getCurrentLocation() instanceof Exit)) {
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private Exit findNearestExit() {
+        Map<BuildingElement, Integer> bfs = bfsFrom(assignedRoom, controller.getGraph());
+        Exit best = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (BuildingElement el : controller.getGraph().getElements()) {
+            if (el instanceof Exit ex) {
+                int d = bfs.getOrDefault(ex, Integer.MAX_VALUE);
+                if (d < bestDist) { bestDist = d; best = ex; }
+            }
+        }
+        return best;
+    }
+
+    private String buildPrevRoomsText() {
+        Graph graph = controller.getGraph();
+        Room fireRoom = findFireRoom(graph);
+        int fireFloor = fireRoom != null ? fireRoom.getFloor() : -1;
+
+        List<Room> floorRooms = new ArrayList<>();
+        for (BuildingElement el : graph.getElements()) {
+            if (el instanceof Room r && !(el instanceof Exit)
+                    && r.getFloor() == assignedRoom.getFloor()) {
+                floorRooms.add(r);
+            }
+        }
+
+        Map<Room, Integer> distances = new HashMap<>();
+        if (assignedRoom.getFloor() == fireFloor && fireRoom != null) {
+            Map<BuildingElement, Integer> bfs = bfsFrom(fireRoom, graph);
+            floorRooms.forEach(r -> distances.put(r, bfs.getOrDefault(r, 999)));
+        } else {
+            List<BuildingElement> anchors = new ArrayList<>();
+            for (BuildingElement el : graph.getElements()) {
+                if ((el instanceof Passage p && p.getType() == PassageType.STAIRCASE)
+                        || el instanceof Exit) anchors.add(el);
+            }
+            for (Room r : floorRooms) {
+                int minDist = 999;
+                for (BuildingElement anchor : anchors) {
+                    int d = bfsFrom(anchor, graph).getOrDefault(r, 999);
+                    if (d < minDist) minDist = d;
+                }
+                distances.put(r, minDist);
+            }
+        }
+
+        floorRooms.sort(Comparator.comparingInt(r -> distances.getOrDefault(r, 999)));
+
+        StringJoiner sj = new StringJoiner(", ");
+        for (int i = 0; i < myOrder - 1 && i < floorRooms.size(); i++) {
+            sj.add(floorRooms.get(i).getName());
+        }
+        return sj.toString().isEmpty() ? "—" : sj.toString();
+    }
+
+    /**
+     * BFS over the graph model (Room ↔ Passage via Door).
+     * @param source starting element
+     * @param graph  graph to traverse
+     * @return map of element → hop distance from source
+     */
+    private Map<BuildingElement, Integer> bfsFrom(BuildingElement source, Graph graph) {
+        Map<BuildingElement, Integer> dist = new HashMap<>();
+        Queue<BuildingElement> queue = new LinkedList<>();
+        dist.put(source, 0);
+        queue.add(source);
+        while (!queue.isEmpty()) {
+            BuildingElement cur = queue.poll();
+            int d = dist.get(cur);
+            // Find neighbors
+            if (cur instanceof Room room) {
+                for (Door door : room.getDoors()) {
+                    Passage p = door.getPassage();
+                    if (!dist.containsKey(p)) { dist.put(p, d + 1); queue.add(p); }
+                    // Also traverse junction room if passage connects to another room
+                    for (Door pd : p.getConnectedDoors()) {
+                        Room nb = pd.getRoom();
+                        if (nb != null && !dist.containsKey(nb)) { dist.put(nb, d + 2); queue.add(nb); }
+                    }
+                }
+            } else if (cur instanceof Passage passage) {
+                for (Door door : passage.getConnectedDoors()) {
+                    Room nb = door.getRoom();
+                    if (nb != null && !dist.containsKey(nb)) { dist.put(nb, d + 1); queue.add(nb); }
+                }
+            }
+        }
+        return dist;
     }
 
     private void goBack() {
