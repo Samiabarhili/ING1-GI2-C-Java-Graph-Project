@@ -1,4 +1,4 @@
-package com.example.cysafe;
+package com.example.cysafecampus;
 
 import com.example.cysafecampus.controller.GraphController;
 import com.example.cysafecampus.model.*;
