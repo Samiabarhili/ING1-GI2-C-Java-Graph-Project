@@ -66,13 +66,7 @@ public class LoginView {
                 "#1a237e", "#283593", "🛡", this::openAdmin),
             roleCard("Superviseur",
                 "Gestion d'une salle  ·  Réception des ordres",
-                "#1b5e20", "#2e7d32", "👤", this::openSupervisor),
-            roleCard("Agent de sécurité",
-                "Zone assignée  ·  Contrôle des portes",
-                "#b71c1c", "#c62828", "🔒", this::openSecurity),
-            roleCard("Observateur",
-                "Vue globale en lecture seule",
-                "#37474f", "#455a64", "👁", this::openObserver)
+                "#1b5e20", "#2e7d32", "👤", this::openSupervisor)
         );
         cards.setAlignment(Pos.CENTER);
 
@@ -150,30 +144,4 @@ public class LoginView {
         });
     }
 
-    private void openSecurity() {
-        Dialog<String> d = new Dialog<>();
-        d.setTitle("Choisir votre zone");
-        ComboBox<String> zoneBox = new ComboBox<>();
-        controller.getGraph().getElements().stream()
-            .filter(el -> !el.getName().contains("↔"))
-            .forEach(el -> zoneBox.getItems().add(el.getName()));
-        zoneBox.getSelectionModel().selectFirst();
-        GridPane g = new GridPane();
-        g.setHgap(10); g.setVgap(10); g.setPadding(new Insets(10));
-        g.add(new Label("Votre zone :"), 0, 0);
-        g.add(zoneBox, 1, 0);
-        d.getDialogPane().setContent(g);
-        d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        d.setResultConverter(btn -> btn == ButtonType.OK ? zoneBox.getValue() : null);
-        d.showAndWait().ifPresent(name -> {
-            controller.getGraph().getElements().stream()
-                .filter(el -> el.getName().equals(name))
-                .findFirst()
-                .ifPresent(el -> new SecurityView(stage, controller, el).show());
-        });
-    }
-
-    private void openObserver() {
-        new ObserverView(stage, controller).show();
-    }
 }
