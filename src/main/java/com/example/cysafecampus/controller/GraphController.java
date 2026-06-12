@@ -1017,6 +1017,6 @@ public class GraphController {
      * @param b second passage node
      */
     private void connectPassageToPassage(Passage a, Passage b) {
-        connectPassageToPassage(a, b, 10);
+        connectPassageToPassag(a, b, 10);
     }
 }
