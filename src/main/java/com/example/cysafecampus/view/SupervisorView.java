@@ -389,4 +389,4 @@ public class SupervisorView {
         if (refresh != null) refresh.stop();
         new LoginView(stage, controller).show();
     }
-} v
+} 
