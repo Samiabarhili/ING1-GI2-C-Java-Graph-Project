@@ -1,5 +1,4 @@
 package com.example.cysafecampus.model;
-
 /**
  * Interface for the Observer in the Observer pattern.
  * Agents implement this interface to react to building alerts.
