@@ -1,16 +1,22 @@
 package com.example.cysafecampus.view;
 
 import com.example.cysafecampus.controller.GraphController;
-import com.example.cysafecampus.model.*;
+import com.example.cysafecampus.model.Room;
+
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
+import javafx.scene.layout.CornerRadii;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.LinearGradient;
-import javafx.scene.paint.Stop;
-import javafx.scene.paint.CycleMethod;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
@@ -18,6 +24,103 @@ import javafx.stage.Stage;
 
 /**
  * Login screen — clean white design, role selection cards.
+ */
+/**
+ * LoginView is responsible for rendering the initial role-selection screen of the
+ * application and for routing the user to the appropriate view based on their choice.
+ *
+ * <p>The view presents a branded title area, a subtitle, and two "role cards" that
+ * represent the available roles (Administrator and Supervisor). Selecting a card
+ * triggers navigation to the corresponding view (AdminView or SupervisorView).
+ *
+ * <p>This class is tightly coupled to a JavaFX Stage for display and to a
+ * GraphController to access domain elements (e.g. rooms) needed when the user
+ * chooses the Supervisor role.
+ *
+ * Dependencies:
+ * - GraphController: used to fetch graph elements and rooms.
+ * - AdminView, SupervisorView: views instantiated when a role is chosen.
+ * - Room: used to identify and pass the selected room to SupervisorView.
+ */
+ 
+/**
+ * The primary stage used to display the login UI.
+ *
+ * @implNote Initialized via constructor and used to replace the current scene
+ *           when navigating to other views.
+ */
+ 
+/**
+ * Controller providing access to application graph and business logic needed
+ * by the login interactions (room enumeration, navigation to other views).
+ */
+ 
+/**
+ * Create a new LoginView.
+ *
+ * @param stage      the JavaFX Stage on which the login scene will be shown.
+ *                   The stage is not created by this class and should be managed
+ *                   by the application.
+ * @param controller the GraphController instance used to query rooms and to
+ *                   hand to subsequent views (AdminView / SupervisorView).
+ */
+ 
+/**
+ * Build and display the login scene on the associated Stage.
+ *
+ * <p>The scene includes:
+ * - a branded title (CY SafeCampus) and subtitle,
+ * - a decorative separator,
+ * - a prompt to select a role,
+ * - interactive role cards for "Administrateur" and "Superviseur".
+ *
+ * <p>Each role card has hover highlighting and a click handler. Clicking:
+ * - the Administrator card: opens AdminView on the same Stage.
+ * - the Supervisor card: opens a dialog to pick a room and then opens SupervisorView.
+ *
+ * <p>This method shows the stage (stage.show()) and sets the scene title to
+ * "CY SafeCampus — Connexion".
+ */
+ 
+/**
+ * Create a clickable role "card" UI element.
+ *
+ * <p>The returned VBox is styled with a colored background, padding, a fixed
+ * preferred width, a hand cursor, and mouse handlers for hover and click.
+ *
+ * @param title      the role title displayed on the card (e.g. "Administrateur").
+ * @param desc       a short descriptive text shown under the title.
+ * @param colorDark  the background color used when the card is idle (hex color string).
+ * @param colorLight the background color used when the card is hovered (hex color string).
+ * @param icon       a short icon string (emoji or text) shown beside the title.
+ * @param action     the action to execute when the card is clicked; provided as a Runnable.
+ * @return a configured VBox representing the role card. The caller is responsible
+ *         for adding it to the scene graph.
+ */
+ 
+/**
+ * Open the Administrator view.
+ *
+ * <p>Instantiates and displays an AdminView using the same Stage and the
+ * GraphController passed to this LoginView.
+ *
+ * @implNote Navigation replaces the current scene on the associated Stage.
+ */
+ 
+/**
+ * Open the Supervisor selection flow.
+ *
+ * <p>This method opens a modal dialog allowing the user to choose a room from
+ * the application's graph. The dialog:
+ * - populates a ComboBox with names of Room elements from the controller's graph,
+ *   filtering out connector/bi-directional names (those containing "↔"),
+ * - selects the first available room by default,
+ * - returns the selected room name when the user confirms.
+ *
+ * <p>When a room is chosen and confirmed, the corresponding Room object is
+ * located in the graph and a SupervisorView is instantiated and shown for that room.
+ *
+ * @implNote If no room is selected or the dialog is cancelled, no navigation occurs.
  */
 public class LoginView {
 
@@ -144,4 +247,4 @@ public class LoginView {
         });
     }
 
-} 
+}
