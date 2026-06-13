@@ -89,7 +89,6 @@ public class AdminView {
     private enum NType {
         ROOM, DOOR, HALL, STAIR, EXIT
     }
-
     /**
      * One visual node in the graph.
      */
@@ -111,7 +110,6 @@ public class AdminView {
             this.label = label;
         }
     }
-
     /**
      * One directed edge between two nodes.
      */
@@ -125,7 +123,6 @@ public class AdminView {
             this.to = to;
         }
     }
-
     // ── Floor colour palette ──────────────────────────────
     private static final Color[][] FLOOR_FILL = {
         {Color.web("#dbeafe"), Color.web("#2563eb")}, // 0 RDC - blue
@@ -239,7 +236,6 @@ public class AdminView {
         this.stage = stage;
         this.controller = controller;
     }
-
     /**
      * Displays the administrator interface and starts the render loop.
      *
@@ -289,7 +285,6 @@ public class AdminView {
 
         playPauseBtn.setText(controller.isRunning() ? "⏸ Pause" : "▶ Play");
     }
-
     // ── Initial graph ─────────────────────────────────────
     /**
      * Reconstructs the visual graph (nodes / edges) from the real model in
@@ -354,7 +349,6 @@ public class AdminView {
 
             nodes.add(n);
         }
-
         // 2. Build Door VNodes for every real model Door (Room/Exit ↔ Passage). ─
         //    The door sits at the midpoint of its (room, passage) segment and
         //    splits the visual edge in two: Room → Door → Passage. This keeps
@@ -442,7 +436,6 @@ public class AdminView {
         //    coordinates without disturbing their progress along edges.
         resyncVisualAgentsFromModel();
     }
-
     /**
      * Stable visual id for a Door VNode that represents the real model Door
      * between {@code roomName} and {@code passageName}.
@@ -455,7 +448,6 @@ public class AdminView {
     private String doorVNodeId(String roomName, String passageName) {
         return "door::" + roomName + "::" + passageName;
     }
-
     /**
      * Maps a model element to its visual node type. Note: {@link Exit} extends
      * {@link Room}, so Exit must be tested first. {@link NType#DOOR} is
@@ -487,7 +479,6 @@ public class AdminView {
     private int modelFloor(BuildingElement el) {
         return el == null ? 0 : Math.max(0, el.getFloor());
     }
-
     // ── Initial graph (LEGACY) ────────────────────────────
     /**
      * @deprecated Legacy hard-coded visual graph. No longer used: the visual
@@ -659,7 +650,6 @@ public class AdminView {
         }
         return name;
     }
-
     /**
      * Automatically connects a newly created room-like element to the nearest
      * passage on the same floor when it is close enough.
