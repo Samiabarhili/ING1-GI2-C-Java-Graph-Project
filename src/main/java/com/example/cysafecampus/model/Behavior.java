@@ -1,5 +1,4 @@
 package com.example.cysafecampus.model;
-
 /**
  * Defines the inherent movement behavior of an agent.
  * Influences how the agent interacts with others in congested areas.
