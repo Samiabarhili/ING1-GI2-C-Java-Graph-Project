@@ -1,7 +1,6 @@
 package com.example.cysafecampus.model;
 
 import java.util.List;
-
 /**
  * Interface defining the movement strategy for an agent.
  * Different strategies implement different behaviors
