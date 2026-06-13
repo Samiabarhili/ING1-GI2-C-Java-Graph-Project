@@ -13,4 +13,3 @@ public enum SensorEventType {
     /** Element has reached or exceeded its max capacity */
     OVERCROWDING
 }
-n
