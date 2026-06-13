@@ -1,62 +1,66 @@
 package com.example.cysafecampus.model;
 
 /**
- * Represents an anonymous occupant (student, staff, teacher).
- * Persons do NOT move on their own — they wait until a SupervisorAgent
- * or AdminAgent triggers evacuation. This is realistic: people wait
- * for instructions before leaving.
+ * Represents an occupant agent in the building simulation.
  *
- * On FIRE alert : switches to PANICKED state (but still needs an order to move)
- * On guide order: receives EvacuateStrategy and starts moving
+ * <p>
+ * A person is idle by default and waits for an alert or evacuation order before
+ * moving. During a fire alert, the person may become panicked depending on its
+ * behavior. In all cases, movement remains progressive through an
+ * {@link EvacuateStrategy}.
+ * </p>
+ *
+ * @see Agent
+ * @see EvacuateStrategy
  */
 public class Person extends Agent {
 
     /**
-     * Constructor — no default strategy, Person is idle until ordered.
+     * Constructs a person with no default movement strategy.
+     *
+     * @param name display name or identifier for this person
+     * @param currentLocation initial building element where the person is located
+     * @param maxSpeed maximum movement speed
+     * @param behavior social behavior used during evacuation
+     * @param densityTolerance tolerance to crowd density
      */
     public Person(String name, BuildingElement currentLocation,
-                  double maxSpeed, Behavior behavior, double densityTolerance) {
+            double maxSpeed, Behavior behavior, double densityTolerance) {
         super(name, currentLocation, maxSpeed, behavior, densityTolerance);
-        // No strategy by default — Person waits for an order
         this.setStrategy(null);
     }
 
     /**
-     * Reacts to building-wide alert.
-     * Switches to PANICKED state but does NOT start moving automatically.
-     * A supervisor must call guideOccupants() to trigger actual movement.
+     * Reacts to a building-wide alert.
      *
-     * Exception: if already has a strategy (was already guided), keep moving.
+     * <p>
+     * On a fire alert, the person may become panicked according to its behavior.
+     * On a normal alert, the person returns to a calm state. In both cases, an
+     * evacuation strategy is assigned so movement remains progressive.
+     * </p>
+     *
+     * @param alert alert type, such as {@code "FIRE"} or {@code "NORMAL"}
      */
     @Override
     public void update(String alert) {
         if (alert.equals("FIRE")) {
-            // Do not make every person panicked: a realistic crowd contains calm
-            // and stressed occupants. RUDE agents panic more often, POLITE agents
-            // usually stay calm, and FOLLOWER agents are in between.
             if (shouldPanic()) {
                 setState(AgentState.PANICKED);
             } else {
                 setState(AgentState.CALM);
             }
 
-            // Keep the progressive movement strategy. PanicStrategy used to move
-            // the agent directly into the next passage before drawing progress,
-            // which created visual jumps when the alarm was triggered.
             setStrategy(new EvacuateStrategy());
-            setPath(new java.util.ArrayList<>());
-            setProgress(0.0);
         } else if (alert.equals("NORMAL")) {
             setState(AgentState.CALM);
             setStrategy(new EvacuateStrategy());
-            setPath(new java.util.ArrayList<>());
-            setProgress(0.0);
         }
     }
 
     /**
      * Decides whether this person becomes panicked during an alert.
-     * @return true when the person should be displayed as panicked
+     *
+     * @return {@code true} if the person becomes panicked
      */
     private boolean shouldPanic() {
         double panicProbability;

@@ -1,20 +1,28 @@
 package com.example.cysafecampus.model;
 
 /**
- * Security agent responsible for physically securing a zone
- * and guiding people during an evacuation.
- * Uses GuideStrategy by default, switches to EvacuateStrategy on alert.
+ * Specialized agent responsible for securing an assigned building zone.
+ *
+ * <p>
+ * A security agent starts with a guiding strategy and can react to alerts by
+ * staying calm and helping with evacuation.
+ * </p>
+ *
+ * @see Agent
+ * @see BuildingElement
+ * @see GuideStrategy
  */
 public class SecurityAgent extends Agent {
 
-    /** The building element this agent is responsible for */
+    /** Building element this agent is responsible for. */
     private BuildingElement assignedZone;
 
     /**
-     * Constructor for SecurityAgent.
-     * @param name the agent's name
-     * @param currentLocation starting location
-     * @param assignedZone the zone to manage
+     * Constructs a security agent assigned to a specific zone.
+     *
+     * @param name agent name
+     * @param currentLocation starting location in the building
+     * @param assignedZone zone managed by this security agent
      */
     public SecurityAgent(String name, BuildingElement currentLocation, BuildingElement assignedZone) {
         super(name, currentLocation, 1.5, Behavior.RUDE, 1.0);
@@ -23,17 +31,33 @@ public class SecurityAgent extends Agent {
         this.setStrategy(new GuideStrategy());
     }
 
-    public BuildingElement getAssignedZone() { return assignedZone; }
-    public void setAssignedZone(BuildingElement zone) { this.assignedZone = zone; }
+    /**
+     * Returns the zone assigned to this security agent.
+     *
+     * @return assigned building element
+     */
+    public BuildingElement getAssignedZone() {
+        return assignedZone;
+    }
 
     /**
-     * On alert, switches to GuideStrategy to lead people out.
-     * @param alert the alert type (e.g. "FIRE")
+     * Assigns a new zone to this security agent.
+     *
+     * @param zone new assigned zone
+     */
+    public void setAssignedZone(BuildingElement zone) {
+        this.assignedZone = zone;
+    }
+
+    /**
+     * Reacts to an alert message.
+     *
+     * @param alert alert type, for example {@code "FIRE"}
      */
     @Override
     public void update(String alert) {
         if (alert.equals("FIRE")) {
-            setState(AgentState.CALM); // security stays calm
+            setState(AgentState.CALM);
             setStrategy(new GuideStrategy());
         }
     }
