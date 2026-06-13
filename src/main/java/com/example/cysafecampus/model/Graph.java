@@ -1,8 +1,8 @@
 package com.example.cysafecampus.model;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-import java.io.Serializable;
 
 /**
  * Represents the building as a graph.
@@ -12,6 +12,56 @@ import java.io.Serializable;
  *   - Graph still implements Subject for the legacy Agent notification chain
  *     (triggerAlert → all agents get update())
  *   - Sensors now have their own Subject role toward AdminAgent via SensorObserver
+ */
+/**
+ * Central model of a building used by the simulation.
+ *
+ * <p>
+ * The Graph holds the static topology (BuildingElement instances and Passage
+ * connections) together with dynamic runtime state (Agent and Sensor instances).
+ * It also implements a simple subject/observer mechanism to broadcast
+ * building-wide alerts (e.g. fire) to interested observers such as agents.
+ * </p>
+ *
+ * <h3>Responsibilities</h3>
+ * <ul>
+ *   <li>Maintain collections of building elements and passages that compose the
+ *       physical layout.</li>
+ *   <li>Manage agents: adding/removing agents and registering them as observers
+ *       for alerts. When an agent is added or removed, the agent's current
+ *       location is updated accordingly.</li>
+ *   <li>Manage sensors and provide a tick method (runSensors) to trigger their
+ *       detection logic each simulation cycle.</li>
+ *   <li>Detect congested building elements via detectCongestion().</li>
+ *   <li>Broadcast alerts to registered observers via triggerAlert() and
+ *       notifyObservers() (notifyObservers triggers a FIRE alert by default).</li>
+ *   <li>Expose whether an emergency is currently active via isEmergencyActive().</li>
+ * </ul>
+ *
+ * <h3>Threading and concurrency</h3>
+ * <p>
+ * The agents and observers collections are backed by synchronized lists to
+ * reduce the risk of ConcurrentModificationExceptions between the simulation
+ * thread (tick/move) and a UI/render thread. However, callers should still be
+ * careful: getters expose the live internal lists and additional external
+ * synchronization may be required for compound operations.
+ * </p>
+ *
+ * <h3>Notes</h3>
+ * <ul>
+ *   <li>The class implements Serializable so the model can be serialized if
+ *       needed. Transient or custom serialization concerns are not addressed
+ *       by this comment.</li>
+ *   <li>triggerAlert() sets an internal emergency flag (emergencyActive) to
+ *       indicate whether the building is in a non-normal state.</li>
+ *   <li>Adding an agent registers it as an observer; removing an agent removes
+ *       it from the observer list to avoid "ghost" observers.</li>
+ * </ul>
+ *
+ * @see com.example.cysafecampus.model.Agent
+ * @see com.example.cysafecampus.model.Sensor
+ * @see com.example.cysafecampus.model.BuildingElement
+ * @see com.example.cysafecampus.model.Passage
  */
 public class Graph implements Subject, Serializable {
 

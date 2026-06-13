@@ -8,14 +8,35 @@ import java.util.List;
  * Passages connect building elements and contain physical constraints
  * that affect agent movement.
  */
+/**
+ * Represents a traversable passage within the building model, such as a corridor or staircase.
+ * <p>
+ * A Passage is a BuildingElement that connects rooms via Doors and provides additional
+ * attributes used by routing and simulation algorithms:
+ * <ul>
+ *   <li>speedFactor — a multiplier applied to agent movement speed when traversing the passage
+ *       (&lt; 1.0 slows agents, &gt; 1.0 speeds them up).</li>
+ *   <li>type — the PassageType (e.g. CORRIDOR or STAIRCASE) describing the physical kind of passage.</li>
+ *   <li>distance — the physical length used for shortest-path calculations.</li>
+ *   <li>connectedDoors — the doors that link this passage to rooms, allowing bidirectional movement.</li>
+ *   <li>isOneWay — when true, the passage can only be traversed in a single direction.</li>
+ *   <li>lanes — number of parallel lanes (1 = no overtaking, &gt;1 = overtaking possible).</li>
+ * </ul>
+ * <p>
+ * Typical usage: create a Passage with name, capacity, floor, speed factor, type and distance,
+ * attach Doors via addDoor(Door) and query its properties during routing or simulation.
+ *
+ * @see com.example.cysafecampus.model.BuildingElement
+ * @see com.example.cysafecampus.model.Door
+ * @see com.example.cysafecampus.model.PassageType
+ *
+ */
 public class Passage extends BuildingElement {
 
     /** Speed multiplier for agents moving through this passage.
-     * < 1.0 = slower (e.g., stairs), > 1.0 = faster (e.g., moving walkway) */
+* Values below {@code 1.0} make movement slower, values above {@code 1.0}
+* make movement faster. */
     private double speedFactor;
-
-    /** Floor number where this passage is located */
-    private int floor;
 
     /** Type of passage: CORRIDOR or STAIRCASE */
     private PassageType type;
@@ -44,7 +65,7 @@ public class Passage extends BuildingElement {
     public Passage(String name, int maxCapacity, int floor,
                    double speedFactor, PassageType type, double distance) {
         super(name, maxCapacity);
-        this.floor = floor;
+        setFloor(floor);
         this.speedFactor = speedFactor;
         this.type = type;
         this.distance = distance;
@@ -52,7 +73,6 @@ public class Passage extends BuildingElement {
     }
 
     public double getSpeedFactor() { return speedFactor; }
-    public int getFloor() { return floor; }
     public PassageType getType() { return type; }
     public double getDistance() { return distance; }
     public List<Door> getConnectedDoors() { return connectedDoors; }
