@@ -9,6 +9,30 @@ import java.util.List;
  * Aggregates all EvacuationOrders, one per room to evacuate.
  * Calling execute() dispatches each order to the relevant SupervisorAgent.
  */
+/**
+ * Represents a serializable evacuation plan composed of multiple {@code EvacuationOrder}
+ * instances.
+ *
+ * <p>The plan maintains an ordered, mutable list of evacuation orders. Orders can be
+ * added to the plan via {@code addOrder(EvacuationOrder)}, inspected via
+ * {@code getOrders()}, and executed via {@code execute()}. In the current
+ * implementation {@code execute()} prints a short summary for each order to
+ * standard output; in a production system this method would typically dispatch
+ * orders to supervisors or other external systems.</p>
+ *
+ * <p>Note:
+ * <ul>
+ *   <li>The class is mutable and not thread-safe. Concurrent access should be
+ *       synchronized externally if required.</li>
+ *   <li>{@code getOrders()} exposes the live list of orders — modifications to
+ *       the returned list affect the plan.</li>
+ * </ul>
+ * </p>
+ *
+ * @see EvacuationOrder
+ * @see java.io.Serializable
+ * @since 1.0
+ */
 public class EvacuationPlan implements Serializable {
 
     /** All individual evacuation orders composing this plan */
