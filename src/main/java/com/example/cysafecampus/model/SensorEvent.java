@@ -7,6 +7,34 @@ import java.io.Serializable;
  * Carries all context needed for AdminAgent to make decisions:
  * what happened, how severe, and where.
  */
+/**
+ * Represents an event produced by a sensor within the building model.
+ *
+ * <p>Each SensorEvent carries:
+ * <ul>
+ *   <li>a {@link SensorEventType} describing the kind of event detected;</li>
+ *   <li>a severity level (integer from 1 = low to 5 = critical) used by agents
+ *       (for example {@code AdminAgent}) to decide whether to escalate or notify
+ *       supervisors;</li>
+ *   <li>the {@link BuildingElement} where the event was detected;</li>
+ *   <li>a timestamp (milliseconds since the epoch) captured at construction time
+ *       via {@link System#currentTimeMillis()}.</li>
+ * </ul>
+ *
+ * <p>This class implements {@link java.io.Serializable} so events can be serialized
+ * for transmission or persistence. Instances are initialized via the constructor
+ * and expose read-only accessors for their properties.
+ *
+ * <p>Examples:
+ * <pre>
+ * SensorEvent e = new SensorEvent(SensorEventType.FIRE, 5, someBuildingElement);
+ * System.out.println(e.getTimestamp()); // construction time in ms
+ * </pre>
+ *
+ * @see SensorEventType
+ * @see BuildingElement
+ * @since 1.0
+ */
 public class SensorEvent implements Serializable {
 
     /** Type of event detected */
