@@ -18,7 +18,6 @@ import com.example.cysafecampus.view.LoginView;
 
 import javafx.application.Application;
 import javafx.stage.Stage;
-
 /**
  * Main entry point of CY SafeCampus.
  * Launches the login screen (role selection) or CLI mode.
