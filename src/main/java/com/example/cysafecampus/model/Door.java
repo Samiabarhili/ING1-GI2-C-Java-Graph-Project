@@ -237,3 +237,5 @@ public class Door implements Serializable {
                 + ", occupancy=" + currentOccupancy + "/" + maxCapacity + "]";
     }
 }
+
+
