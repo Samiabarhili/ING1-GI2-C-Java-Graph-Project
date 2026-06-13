@@ -3,7 +3,6 @@ package com.example.cysafecampus.model;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-
 /**
  * Represents the full evacuation plan built by AdminAgent.
  * Aggregates all EvacuationOrders, one per room to evacuate.
