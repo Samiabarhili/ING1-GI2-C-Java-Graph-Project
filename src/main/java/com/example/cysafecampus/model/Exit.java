@@ -14,7 +14,6 @@ package com.example.cysafecampus.model;
  * </p>
  */
 public class Exit extends Room {
-
     /**
      * Constructs an exit with the specified name and maximum capacity.
      *
