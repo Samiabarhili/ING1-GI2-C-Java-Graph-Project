@@ -3,14 +3,16 @@
 > Realized by Abdou Malak, Amaini Maellys, Barhili Samia and Benameur Bayane
 
 ## Objective
-JavaFX application simulating agent movement in a graph representing the CY Tech campus. Allows visualization and simulation of an emergency evacuation with multiple roles.
 
------
+JavaFX application simulating agent movement in a graph representing a CY Tech building.
+The application allows users to visualize and simulate an emergency evacuation with different roles.
+
+---
 
 ## Requirements
 
-- **Java 21** or higher
-- **Maven 3.8+**
+* **Java 21** or higher
+* **Maven 3.8+**
 
 Check:
 
@@ -26,13 +28,12 @@ sudo apt install maven        # Linux
 brew install maven            # Mac
 ```
 
------
+---
 
 ## Run the project
 
 ```bash
-# 1. Clone the repo
-download the .zip and unzip it
+# 1. Download the ZIP file and unzip it
 
 # 2. Launch the graphical interface
 mvn javafx:run
@@ -42,13 +43,13 @@ mvn package
 java -jar target/cysafecampus-1.0.jar cli
 ```
 
-The first time, Maven downloads JavaFX automatically (~2 min). After that, it is instant.
+The first time, Maven downloads JavaFX automatically. This may take around two minutes. After that, the launch is faster.
 
------
+---
 
 ## Project structure
 
-```
+```text
 cysafecampus/
 ├── pom.xml                          # Maven configuration + JavaFX dependencies
 ├── .gitignore
@@ -59,69 +60,65 @@ cysafecampus/
     │   └── GraphController.java     # MVC — connects model and views
     ├── model/
     │   ├── Agent.java               # Abstract agent class
-    │   ├── Person.java              # Regular occupant (crowd)
-    │   ├── AdminAgent.java          # Admin agent (big boss)
+    │   ├── Person.java              # Regular occupant
+    │   ├── AdminAgent.java          # Administrative evacuation coordinator
     │   ├── SupervisorAgent.java     # Supervisor agent per room
-    │   ├── SecurityAgent.java       # Security agent
     │   ├── BuildingElement.java     # Abstract building element
     │   ├── Room.java                # Room
     │   ├── Passage.java             # Corridor / staircase / hall
     │   ├── Exit.java                # Exit
-    │   ├── Door.java                # Door (room ↔ corridor connection)
+    │   ├── Door.java                # Door (room ↔ passage connection)
     │   ├── Graph.java               # Main simulation container
     │   ├── SimulationEngine.java    # Simulation loop (tick)
     │   ├── SimulationSerializer.java# Save / Load (binary serialization)
-    │   ├── PathFinder.java          # Dijkstra (shortest / fastest)
+    │   ├── PathFinder.java          # Dijkstra algorithm (shortest / fastest path)
     │   ├── Sensor.java              # Abstract sensor
     │   ├── PresenceSensor.java      # Presence sensor
     │   ├── SmokeSensor.java         # Smoke sensor
-    │   ├── MovementStrategy.java    # Strategy interface (Strategy pattern)
-    │   ├── EvacuateStrategy.java    # Calm evacuation
-    │   ├── PanicStrategy.java       # Panic evacuation
-    │   └── GuideStrategy.java       # Guiding (security agents)
+    │   ├── MovementStrategy.java    # Strategy interface
+    │   ├── EvacuateStrategy.java    # Calm evacuation behavior
+    │   ├── PanicStrategy.java       # Panic evacuation behavior
+    │   └── GuideStrategy.java       # Guiding behavior
     └── view/
         ├── LoginView.java           # Role selection screen
         ├── AdminView.java           # Administrator view
-        ├── SupervisorView.java      # Supervisor view (per room)
-        ├── SecurityView.java        # Security agent view
-        └── ObserverView.java        # Observer view (read-only)
+        └── SupervisorView.java      # Supervisor view
 ```
 
------
+---
 
 ## Roles and interfaces
 
-|Role                 |Interface                                            |Access        |
-|---------------------|-----------------------------------------------------|-------------|
-|**Administrator**    |Full plan, sensors, evacuation orders, agent management|Full         |
-|**Supervisor**       |Own room only, occupants, evacuation order           |Limited      |
-|**Security agent**   |Own area, door control                               |Limited      |
-|**Observer**         |Global read-only view                                 |Read-only   |
+| Role              | Interface                                                             | Access  |
+| ----------------- | --------------------------------------------------------------------- | ------- |
+| **Administrator** | `AdminView` — full plan, sensors, evacuation orders, agent management | Full    |
+| **Supervisor**    | `SupervisorView` — assigned room, occupants and evacuation order      | Limited |
 
------
+---
 
 ## Features
 
-- Tick-by-tick simulation with play / pause / step
-- Adjustable speed
-- Agents with speed, behavior (POLITE / FOLLOWER / RUDE) and density tolerance
-- Path calculation: shortest path (Dijkstra distance) and fastest path (Dijkstra time + congestion)
-- Bottleneck handling (high congestion = 2 wait cycles)
-- Presence and smoke sensors with real-time alerts
-- Node colors based on density (green → orange → red)
-- Add / remove / modify nodes, edges, and agents live
-- Random node and agent generation with configurable ranges
-- Save / Load simulation state (binary `.bin` file)
-- CLI mode to test logic without the interface
+* Tick-by-tick simulation with play / pause / step
+* Adjustable simulation speed
+* Agents with speed, behavior (`POLITE`, `FOLLOWER`, `RUDE`) and density tolerance
+* Path calculation: shortest path using Dijkstra based on distance
+* Path calculation: fastest path using Dijkstra based on estimated time and congestion
+* Bottleneck handling when a passage is highly congested
+* Presence and smoke sensors with real-time alerts
+* Node colors based on density, from green to orange to red
+* Add, remove and modify nodes, edges and agents during the simulation
+* Random node and agent generation with configurable ranges
+* Save / load simulation state using a binary `.bin` file
+* CLI mode to test the logic without the graphical interface
 
------
+---
 
 ## Design patterns used
 
-- **Strategy** — `MovementStrategy` (Evacuate / Panic / Guide)
-- **Observer** — `Graph` notifies agents (`Subject` / `Observer`)
-- **Observer** — `Sensor` notifies `AdminAgent` (`SensorObserver`)
-- **MVC** — `GraphController` connects the model and JavaFX views
-- **Serialization** — `SimulationSerializer` for save/load
+* **Strategy** — `MovementStrategy` with evacuation, panic and guide behaviors
+* **Observer** — `Graph` notifies agents using `Subject` / `Observer`
+* **Observer** — `Sensor` notifies `AdminAgent` using `SensorObserver`
+* **MVC** — `GraphController` connects the model and JavaFX views
+* **Serialization** — `SimulationSerializer` handles save and load
 
------  
+---
