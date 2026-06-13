@@ -11,6 +11,58 @@ import java.util.List;
  *
  * Chain: Sensor → SensorEvent → AdminAgent → EvacuationOrder → SupervisorAgent
  */
+/**
+ * Administrative agent responsible for coordinating building evacuations and
+ * supervising subordinate SupervisorAgent instances.
+ *
+ * <p>This agent observes SensorEvent notifications (implements SensorObserver)
+ * and reacts to both localized sensor events and building-wide alerts coming
+ * from the Graph. It builds and maintains an EvacuationPlan, dispatches
+ * EvacuationOrder instances to supervisors, and can cause building elements
+ * (e.g. doors) to change state in response to critical conditions.</p>
+ *
+ * <h3>Responsibilities</h3>
+ * <ul>
+ *   <li>Maintain a collection of managed SupervisorAgent instances.</li>
+ *   <li>Construct and update an EvacuationPlan when hazards are detected.</li>
+ *   <li>Determine nearest exits using PathFinder and create EvacuationOrder(s).</li>
+ *   <li>Notify the appropriate supervisor(s) for a given evacuation order. In
+ *       severe situations, notify all supervisors.</li>
+ *   <li>Open emergency doors across the building on critical alerts.</li>
+ *   <li>Register and deregister agents within the simulation Graph.</li>
+ * </ul>
+ *
+ * <h3>Behavioral rules</h3>
+ * <ul>
+ *   <li>Sensor event severity 1–2: logged only.</li>
+ *   <li>Sensor event severity 3: build an evacuation plan for the affected room.</li>
+ *   <li>Sensor event severity 4–5: build plan and immediately open emergency doors
+ *       and/or notify all supervisors (building-wide emergency).</li>
+ * </ul>
+ *
+ * <h3>Side effects</h3>
+ * <ul>
+ *   <li>Modifies the simulation Graph (adds/removes agents and opens doors).</li>
+ *   <li>Alters the current EvacuationPlan by adding EvacuationOrder objects.</li>
+ *   <li>Invokes PathFinder to compute routes between rooms and exits.</li>
+ * </ul>
+ *
+ * <h3>Usage notes</h3>
+ * <ul>
+ *   <li>The AdminAgent must be provided with a reference to the Graph so it
+ *       can act on building elements and register agents.</li>
+ *   <li>findNearestExit and PathFinder usage assumes the graph elements and
+ *       connectivity are already populated.</li>
+ *   <li>Not synchronized — concurrent access to supervisors, the graph, or the
+ *       current plan should be externally coordinated if used from multiple threads.</li>
+ * </ul>
+ *
+ * @see com.example.cysafecampus.model.SupervisorAgent
+ * @see com.example.cysafecampus.model.EvacuationPlan
+ * @see com.example.cysafecampus.model.EvacuationOrder
+ * @see com.example.cysafecampus.model.Graph
+ * @see com.example.cysafecampus.model.SensorObserver
+ */
 public class AdminAgent extends Agent implements SensorObserver {
 
     /** All supervisor agents managed by this admin */
