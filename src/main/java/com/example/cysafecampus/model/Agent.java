@@ -4,7 +4,6 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-
 /**
  * Abstract class representing an agent moving in the building. Implements
  * Observer (Graph alert chain) and Serializable.
