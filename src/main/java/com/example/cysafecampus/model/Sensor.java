@@ -3,7 +3,6 @@ package com.example.cysafecampus.model;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-
 /**
  * Abstract class representing a physical sensor attached to a building element.
  * Acts as the Subject in the Sensor → AdminAgent Observer pattern.
