@@ -462,3 +462,5 @@ public class EvacuateStrategy implements MovementStrategy, Serializable {
         return new ArrayList<>();
     }
 }
+
+
