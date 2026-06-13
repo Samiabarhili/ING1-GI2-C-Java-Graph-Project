@@ -2174,4 +2174,6 @@ public class GraphController {
     private void connectPassageToPassage(Passage a, Passage b) {
         connectPassageToPassage(a, b, 10);
     }
-}
+}    
+
+
