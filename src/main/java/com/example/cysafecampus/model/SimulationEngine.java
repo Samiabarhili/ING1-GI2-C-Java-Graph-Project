@@ -1,4 +1,8 @@
+package com.example.cysafecampus.model;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 /**
  * Core simulation engine — decoupled from JavaFX. Manages the tick loop and
  * exposes hooks for the controller/view.
