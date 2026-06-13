@@ -32,7 +32,6 @@ import java.util.List;
  *
  */
 public class Passage extends BuildingElement {
-
     /** Speed multiplier for agents moving through this passage.
 * Values below {@code 1.0} make movement slower, values above {@code 1.0}
 * make movement faster. */
