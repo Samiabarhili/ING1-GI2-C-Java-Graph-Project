@@ -3,7 +3,6 @@ package com.example.cysafecampus.model;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
-
 /**
  * Strategy for panicked agents.
  *
