@@ -70,6 +70,7 @@ import java.util.List;
  * @see BuildingElement
  * @see Passage
  */
+
 public class PanicStrategy extends EvacuateStrategy implements Serializable {
 
     private static final double PANIC_MULTIPLIER = 1.5;
@@ -99,6 +100,7 @@ public class PanicStrategy extends EvacuateStrategy implements Serializable {
                     agent.setPathIndex(0);
                     agent.setProgress(0.0);
                 }
+                
 
                 return;
             }
@@ -216,3 +218,4 @@ public class PanicStrategy extends EvacuateStrategy implements Serializable {
         return BAD_ROUTE_PROBABILITY;
     }
 }
+
