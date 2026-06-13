@@ -1,11 +1,39 @@
 package com.example.cysafecampus.model;
 
-import java.io.*;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 
 /**
  * Utility class to save and load the simulation state.
  * Fulfills the Import/Export evaluation criteria.
  */
+/**
+ * Utility class responsible for persisting and restoring a Graph instance using Java's
+ * built-in object serialization mechanism.
+ *
+ * <p>This class provides two convenience operations:
+ * <ul>
+ *   <li>save(Graph, String) — serialize a Graph to a binary file</li>
+ *   <li>load(String) — read a Graph instance back from a binary file</li>
+ * </ul>
+ *
+ * <p>Important notes:
+ * <ul>
+ *   <li>The Graph instance and any objects it references must implement {@code Serializable}
+ *       (directly or transitively) for serialization and deserialization to succeed.</li>
+ *   <li>Deserializing data from untrusted sources is inherently unsafe and may lead to
+ *       security vulnerabilities. Only load files from trusted locations.</li>
+ *   <li>These methods use try-with-resources to ensure streams are closed, but they are not
+ *       synchronized; callers should handle concurrent access to the same file or Graph instance.</li>
+ * </ul>
+ */
+ 
+/**
+ * Saves the provided Graph to the specified file path using Java object serialization.
+ **/
 public class SimulationSerializer {
 
     /**
